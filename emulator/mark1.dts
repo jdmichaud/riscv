@@ -1,0 +1,107 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	compatible = "riscv-minimal-nommu";
+	model = "riscv-minimal-nommu,qemu";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio,0x10000000,1000000 console=ttyS0";
+	};
+
+	// The address after the node name is not important.
+	// see https://devicetree-specification.readthedocs.io/en/latest/chapter3-devicenodes.html#memory-examples
+	memory@80000000 {
+		device_type = "memory";
+		// 0x80000000 is CONFIG_PAGE_OFFSET. Below this value live the memory mapped
+		// devices. Above is the actual memory.
+		// 0x80000000 == 2147483648 == 2G
+		// 0x4000000 == 16777216 == 64M ??
+		reg = <0x00 0x80000000 0x00 0x4000000>;
+	};
+
+	cpus {
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		// 0xf4240 == 1MHz
+		timebase-frequency = <0xf4240>;
+
+		cpu@0 {
+			phandle = <0x01>;
+			device_type = "cpu";
+			// The reg for a CPU is its index
+			reg = <0x00>;
+			status = "okay";
+			compatible = "riscv";
+			riscv,isa = "rv32ima";
+			mmu-type = "riscv,none";
+
+			INTC_1: interrupt-controller {
+				#interrupt-cells = <0x01>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+				phandle = <0x02>;
+			};
+		};
+
+		cpu-map {
+			cluster0 {
+				core0 {
+					cpu = <0x01>;
+				};
+			};
+		};
+	};
+
+	soc {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		// A simple-bus means no driver for the bus. The device attached to this
+		// bus will be handled as if there were memory mapped platform devices.
+		compatible = "simple-bus";
+		// This means there is an identity mapping between the child device and the
+		// parent bus. They are in the same address space (no translation).
+		ranges;
+
+		uart@10000000 {
+			// 16777216 Hz
+			clock-frequency = <0x1000000>;
+			reg = <0x00 0x10000000 0x00 0x100>;
+			compatible = "ns16850";
+		};
+
+		poweroff {
+			value = <0x5555>;
+			offset = <0x00>;
+			// 0x04 -> syscon@11100000 below
+			regmap = <0x04>;
+			compatible = "syscon-poweroff";
+		};
+
+		reboot {
+			value = <0x7777>;
+			offset = <0x00>;
+			// 0x04 -> syscon@11100000 below
+			regmap = <0x04>;
+			compatible = "syscon-reboot";
+		};
+
+		syscon@11100000 {
+			phandle = <0x04>;
+			reg = <0x00 0x11100000 0x00 0x1000>;
+			compatible = "syscon";
+		};
+
+		clint@11000000 {
+		  // INTC_1 is the handle of the interrupt controller. This interrupt
+		  // controller has am #interrupt-cells of 1 so the interrupt is specified
+		  // by a single 32bits number. 0x03 for the first one. Then another
+		  // interrupt, still directed to itnerrupt controller with handle INTC_1 is
+		  // defined as 0x07. So: 0x03 -> INTC_1 and 0x07 -> INTC_1.
+			interrupts-extended = <&INTC_1 0x03 &INTC_1 0x07>;
+			reg = <0x00 0x11000000 0x00 0x10000>;
+			compatible = "sifive,clint0\0riscv,clint0";
+		};
+	};
+};
