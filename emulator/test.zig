@@ -41,10 +41,10 @@ fn println(comptime fmt: []const u8, args: anytype) void {
   std.io.getStdOut().writer().print(fmt ++ "\n", args) catch {};
 }
 
-fn assertEqual(rhs: anytype, lhs: anytype, msg: []const u8) void {
+fn assertEqual(rhs: anytype, lhs: anytype, msg: []const u8) !void {
   if (rhs != lhs) {
     println("error: assertEqual failed: 0x{x:0>8} is not equal to 0x{x:0>8} {s}", .{ rhs, lhs, msg });
-    unreachable;
+    return error.Assert;
   }
 }
 
@@ -210,36 +210,36 @@ pub fn main() !u8 {
           .xreg_value => {
             const value = @intCast(u32, 0x00000000FFFFFFFF & try std.fmt.parseInt(u64, assert.value, 0));
             const register = assert.index.?;
-            assertEqual(cpu.rx[register], @intCast(u32, value),
+            try assertEqual(cpu.rx[register], @intCast(u32, value),
               try std.fmt.allocPrint(allocator, "xreg {} does not have the correct value", .{ register }));
           },
           .pc_value => {
-            assertEqual(cpu.pc, try std.fmt.parseInt(u32, assert.value, 0),
+            try assertEqual(cpu.pc, try std.fmt.parseInt(u32, assert.value, 0),
               "pc does not have the correct value");
           },
           .memory_value => {
             const address = assert.address.?;
             switch (assert.size.?) {
               1 => {
-                assertEqual(cpu.mem[address], try std.fmt.parseInt(u8, assert.value, 0),
+                try assertEqual(cpu.mem[address], try std.fmt.parseInt(u8, assert.value, 0),
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address }));
               },
               2 => {
                 const value = try std.fmt.parseInt(u16, assert.value, 0);
-                assertEqual(cpu.mem[address], value & 0x00FF,
+                try assertEqual(cpu.mem[address], value & 0x00FF,
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address }));
-                assertEqual(cpu.mem[address + 1], (value & 0xFF00) >> 8,
+                try assertEqual(cpu.mem[address + 1], (value & 0xFF00) >> 8,
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address + 1 }));
               },
               4 => {
                 const value = try std.fmt.parseInt(u32, assert.value, 0);
-                assertEqual(cpu.mem[address], value & 0x000000FF,
+                try assertEqual(cpu.mem[address], value & 0x000000FF,
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address }));
-                assertEqual(cpu.mem[address + 1], (value & 0x0000FF00) >> 8,
+                try assertEqual(cpu.mem[address + 1], (value & 0x0000FF00) >> 8,
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address + 1 }));
-                assertEqual(cpu.mem[address + 2], (value & 0x00FF0000) >> 16,
+                try assertEqual(cpu.mem[address + 2], (value & 0x00FF0000) >> 16,
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address + 2 }));
-                assertEqual(cpu.mem[address + 3], (value & 0xFF000000) >> 24,
+                try assertEqual(cpu.mem[address + 3], (value & 0xFF000000) >> 24,
                   try std.fmt.allocPrint(allocator, "mem@0x{x:0>8} does not have the correct value", .{ address + 3 }));
               },
               else => unreachable,
