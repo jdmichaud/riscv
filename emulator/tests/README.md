@@ -37,3 +37,8 @@ zig build-exe -freference-trace test.zig && \
 
 These are the "official tests". The process to get those test is a little involved
 and is encapuslated in a Dockerfile with some instructions.
+
+Execute all the tests:
+```bash
+zig build-exe -freference-trace test_elf.zig && ./test_elf $(find tests/riscv-tests/isa/ -executable -type f -name 'rv32ui*-p-*')
+```

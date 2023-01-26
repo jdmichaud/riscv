@@ -1,4 +1,5 @@
 const std = @import("std");
+const csr = @import("csr.zig");
 
 // As configured in the buildroot kernel.
 // The Device Tree Blob (DTB) describe the memory as follows:
@@ -17,10 +18,10 @@ const CONFIG_PAGE_OFFSET = 0x80000000;
 const DEFAULT_MEM_SIZE = 0x4000000; // 64 MB
 
 const Options = struct {
-  page_offset: u32,
-  mem_size: u32,
+  page_offset: u32, // -p,--page-offset
+  mem_size: u32, // -m,--mempory-size
   exec_filename: []const u8,
-  dtb_filename: ?[]const u8,
+  dtb_filename: ?[]const u8, // -d,--dtb
 };
 
 fn println(comptime fmt: []const u8, args: anytype) void {
@@ -89,6 +90,26 @@ pub const InstructionFormat = enum {
   J,
 };
 
+// Privilege level. Only Machine mode is mandatory (riscv-privileged-20211203.pdf Ch 1.2)
+// and shall be the mode set after reset (riscv-privileged-20211203.pdf Ch 3).
+pub const PrivilegeLevel = enum(u2) {
+  USER_MODE = 0b00,
+  SUPERVISOR_MODE = 0b01,
+  HYPERVISOR_MODE = 0b10,
+  MACHINE_MODE = 0b11,
+};
+
+const Instruction = struct {
+  const Self = @This();
+
+  name: []const u8,
+  opcode: u8,
+  funct3: ?u8,
+  funct7: ?u8,
+  format: InstructionFormat,
+  handler: *const fn(self: Self, cpu: *RiscVCPU(u32), packets: u32) RiscError!void,
+};
+
 // The base RiscVCPU(u32) instruction set only deal with integer. No floating point, not even multiplication
 // and division, which comes in separate extensions.
 // Note that instruction's opcodes are spread around. You have the opcode field
@@ -133,24 +154,54 @@ const instructionSet = [_]Instruction{
   .{ .name = "OR",      .opcode = 0b0110011, .funct3 = 0b110, .funct7 = 0b0000000, .format = InstructionFormat.R, .handler = or_ },
   .{ .name = "AND",     .opcode = 0b0110011, .funct3 = 0b111, .funct7 = 0b0000000, .format = InstructionFormat.R, .handler = and_ },
   .{ .name = "FENCE",   .opcode = 0b0001111, .funct3 = 0b000, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
+  .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = 0b000,  .funct7 = null,      .format = InstructionFormat.I, .handler = ecall },
+  // Zifencei extension
   .{ .name = "FENCE.I", .opcode = 0b0001111, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
-  .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.I, .handler = ecall },
+  // Zicsr extension
+  .{ .name = "CSRRW",   .opcode = 0b1110011, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
+  .{ .name = "CSRRS",   .opcode = 0b1110011, .funct3 = 0b010, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrs },
+  .{ .name = "CSRRC",   .opcode = 0b1110011, .funct3 = 0b011, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
+  .{ .name = "CSRRWI",  .opcode = 0b1110011, .funct3 = 0b101, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
+  .{ .name = "CSRRSI",  .opcode = 0b1110011, .funct3 = 0b110, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
+  .{ .name = "CSRRCI",  .opcode = 0b1110011, .funct3 = 0b111, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
 };
 
+// These are the initial values for the CSR registry file.
+// All the other CSRs must be set to 0.
+pub const rv32_initial_csr_values = [_]std.meta.Tuple(&.{ usize, u32 }) {
+  .{ 0xf14, 0x00 }, // mhardid - Hardware Thread Id
+  .{ 0x06, 0x42 },
+};
+
+// Initialize an array with 0 and fill up the provided initial values.
+pub fn init_csr(comptime T: type, values: []const std.meta.Tuple(&.{ usize, u32 })) [4096]T {
+  var tmp = [_]T{ 0 } ** 4096;
+  for (values) |value| {
+    tmp[value[0]] = value[1];
+  }
+  return tmp;
+}
+
 // A RiscVCPU(T) RISC-V processor is a program counter of Tbits width, 32 Tbits
-// registrers (with register 0 always equal 0) and the associated memory.
-// see riscv-spec-20191213.pdf chapter 2.1 Programer's model for base integer ISA.
+// registrers (with register 0 always equal 0), the 4K CSR registry file and the
+// associated memory, See riscv-spec-20191213.pdf chapter 2.1 Programer's model
+// for the base integer ISA.
 pub fn RiscVCPU(comptime T: type) type {
   return struct {
     const _t = T;
 
-    pc: T,
-    rx: [32]T,
+    pc: T = 0,
+    rx: [32]T = [_]u32{ 0 } ** 32,
     raw_mem: []u8,
     mem: []u8,
+    priv_level: PrivilegeLevel = PrivilegeLevel.MACHINE_MODE,
+    csr: [4096]T = [_]u32{ 0 } ** 4096,
   };
 }
 
+// Instructions have format from which will depend how parameters to the
+// instructions are fetched.
+// See riscv-spec-20191213.pdf Ch. 2.2 Base Instruction Format.
 fn fetchJ(packets: u32) struct { rd: u5, imm: u32 } {
   // 0b00000000 00000000 0000XXXX X0000000
   const rd = (packets & 0x00000F80) >> 7;
@@ -162,7 +213,6 @@ fn fetchJ(packets: u32) struct { rd: u5, imm: u32 } {
     (packets & 0b00000000000100000000000000000000) >> 9 |
     (packets & 0b00000000000011111111000000000000)
   ;
-  // TODO: Extend sign?
   return .{ .rd = @intCast(u5, rd), .imm = imm };
 }
 
@@ -228,17 +278,6 @@ fn fetchU(packets: u32) struct { rd: u5, imm: u32 } {
   };
 }
 
-const Instruction = struct {
-  const Self = @This();
-
-  name: []const u8,
-  opcode: u8,
-  funct3: ?u8,
-  funct7: ?u8,
-  format: InstructionFormat,
-  handler: *const fn(self: Self, cpu: *RiscVCPU(u32), packets: u32) RiscError!void,
-};
-
 fn nullHandler(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = cpu;
   _ = instruction;
@@ -285,9 +324,6 @@ fn jalr(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
   std.log.debug("jalr x{}(0x{x}), x{}(0x{x}, 0x{x}", .{
     params.rd, cpu.rx[params.rd], params.rs1, cpu.rx[params.rs1], params.imm,
   });
-  // We can't add a signed to an unsigned. We need to convert the i21 to a i32
-  // to extend the 2'complement then bitcast it to a u32. Then the addition
-  // kind of work.
   const pc = cpu.pc;
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.pc = (cpu.rx[params.rs1] +% offset) & 0xFFFFFFFE;
@@ -429,9 +465,9 @@ fn lh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn lw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("lw x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
+  std.log.debug("lw x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8})", .{
     params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
-    cpu.rx[params.rs1] + params.imm, cpu.mem[cpu.rx[params.rs1] + params.imm],
+    cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
@@ -727,16 +763,28 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   _ = cpu;
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("ecall rd (0x{x}), rs1 (0x{x}), imm (0x{x})", .{ param.rd, param.rs1, param.imm });
   if (params.imm == 1) {
     // EBREAK
     return RiscError.InstructionNotImplemented;
   }
-  
+
+  std.log.debug("ecall rd (0x{x}), rs1 (0x{x}), imm (0x{x})", .{ params.rd, params.rs1, params.imm });
   return RiscError.InstructionNotImplemented;
 }
 
-fn dump_cpu(cpu: RiscVCPU(u32)) void {
+fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
+  _ = instruction;
+  const params = fetchI(packets);
+  std.log.debug("csrrs x{}, x{}(0x{x}), 0x{x:0>8}", .{
+    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  });
+  const reg = cpu.csr[params.imm];
+  cpu.rx[params.rd] = reg;
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
+}
+
+pub fn dump_cpu(cpu: RiscVCPU(u32)) void {
   println("x0  = 0x{x:0>8} x8  = 0x{x:0>8} x16 = 0x{x:0>8} x24 = 0x{x:0>8}", .{ cpu.rx[0 ], cpu.rx[8 ], cpu.rx[16], cpu.rx[24] });
   println("x1  = 0x{x:0>8} x9  = 0x{x:0>8} x17 = 0x{x:0>8} x25 = 0x{x:0>8}", .{ cpu.rx[1 ], cpu.rx[9 ], cpu.rx[17], cpu.rx[25] });
   println("x2  = 0x{x:0>8} x10 = 0x{x:0>8} x18 = 0x{x:0>8} x26 = 0x{x:0>8}", .{ cpu.rx[2 ], cpu.rx[10], cpu.rx[18], cpu.rx[26] });
@@ -765,7 +813,6 @@ pub fn decode(opcode: u8, funct3: u8, funct7: u8) !Instruction {
       }
     }).asc;
     std.sort.sort(Instruction, &sorted_opcodes, {}, asc);
-    // @compileLog(sorted_opcodes);
     break :blk .{
       .max_opcode = sorted_opcodes[0].opcode,
       .min_opcode = sorted_opcodes[sorted_opcodes.len - 1].opcode,
@@ -792,7 +839,9 @@ pub fn decode(opcode: u8, funct3: u8, funct7: u8) !Instruction {
   }
 }
 
-pub inline fn fetch(packet: u32) struct { opcode: u8, funct3: u8, funct7: u8 } {
+const Code = struct { opcode: u8, funct3: u8, funct7: u8 };
+
+pub inline fn fetch(packet: u32) Code {
   const opcode: u8 = @intCast(u8, 0x7F & packet);
   const funct3: u8 = @intCast(u8, (0x7000 & packet) >> 12);
   const funct7: u8 = @intCast(u8, (0xFE000000 & packet) >> 25);
@@ -804,7 +853,12 @@ pub inline fn fetch(packet: u32) struct { opcode: u8, funct3: u8, funct7: u8 } {
   };
 }
 
-fn cycle(cpu: *RiscVCPU(u32)) !void {
+pub const ErrCode = union(enum) {
+  UnknownInstruction: Code,
+  InstructionNotImplemented: struct { code: Code, inst: Instruction },
+};
+
+pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
   var packets: u32 = cpu.mem[cpu.pc] |
     @as(u32, cpu.mem[cpu.pc + 1]) << 8 |
     @as(u32, cpu.mem[cpu.pc + 2]) << 16 |
@@ -813,29 +867,24 @@ fn cycle(cpu: *RiscVCPU(u32)) !void {
 
   const code = fetch(packets);
   const inst = decode(code.opcode, code.funct3, code.funct7) catch |err| {
-    dump_cpu(cpu.*);
     _ = switch (err) {
       GetInstruction.UnknownInstruction => {
-        println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
-          code.opcode, code.funct3, code.funct7,
-        });
+        return ErrCode{ .UnknownInstruction = code };
       },
     };
     return err;
   };
   inst.handler(inst, cpu, packets) catch |err| {
-    dump_cpu(cpu.*);
     _ = switch (err) {
       RiscError.InstructionNotImplemented => {
-        println("error: instruction not implemented: {s} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
-          inst.name, code.opcode, code.funct3, code.funct7,
-        });
+        return ErrCode{ .InstructionNotImplemented = .{ .code = code, .inst = inst } };
       },
     };
     return err;
   };
   // TODO: Find a way to keep x0 always equal to 0 in a better way.
   cpu.rx[0] = 0x0;
+  return null;
 }
 
 fn loadfile(filename: []const u8) ![]align(std.mem.page_size) u8 {
@@ -876,6 +925,7 @@ pub fn main() !u8 {
     .raw_mem = mem,
     // Memory with an "inverse" offset. Accessing mem[page_offset] will access raw_mem[0x0]
     .mem = (mem.ptr - options.page_offset)[0..options.page_offset + options.mem_size],
+    .csr = init_csr(u32, &rv32_initial_csr_values),
   };
   defer allocator.free(cpu.mem);
 
@@ -927,7 +977,22 @@ pub fn main() !u8 {
 
   // Start the emulation.
   while (true) {
-    try cycle(&cpu);
+    switch ((try cycle(&cpu)).?) {
+      ErrCode.UnknownInstruction => |code| {
+        dump_cpu(cpu);
+        println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
+          code.opcode, code.funct3, code.funct7,
+        });
+        return 1;
+      },
+      ErrCode.InstructionNotImplemented => |payload| {
+        dump_cpu(cpu);
+        println("error: instruction not implemented: {s} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
+          payload.inst.name, payload.code.opcode, payload.code.funct3, payload.code.funct7,
+        });
+        return 2;
+      },
+    }
   }
 
   return 0;

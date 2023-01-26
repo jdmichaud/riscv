@@ -135,11 +135,10 @@ pub fn main() !u8 {
   // Create a CPU
   var mem = try allocator.alloc(u8, std.math.pow(u64, 2, 32)); // 4G addressable memory
   var cpu: riscv.RiscVCPU(u32) = .{
-    .pc = 0,
-    .rx = [_]u32{ 0 } ** 32,
     // Memory as allocated
     .raw_mem = mem,
     .mem = mem,
+    .csr = riscv.init_csr(u32, &riscv.rv32_initial_csr_values),
   };
 
   for (args[1..]) |fixture_file| {

@@ -2,3 +2,5 @@ riscv
 test
 *.dtb
 *.elf
+test_json
+test_elf
