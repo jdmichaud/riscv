@@ -72,7 +72,7 @@ pub fn main() !void {
     while (true) {
       if (riscv.cycle(&cpu) catch { fails += 1; break; }) |ret| {
         fails += 1;
-        // riscv.dump_cpu(cpu);
+        riscv.dump_cpu(cpu);
         switch (ret) {
           riscv.ErrCode.UnknownInstruction => |code| {
             println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
@@ -84,6 +84,16 @@ pub fn main() !void {
             println("error: instruction not implemented: {s} (opcode: 0b{b:0>7} funct3: 0b{b:0>3} funct7: 0b{b:0>7})", .{
               payload.inst.name, payload.code.opcode, payload.code.funct3, payload.code.funct7,
             });
+            break;
+          },
+          riscv.ErrCode.InsufficientPrivilegeMode => |payload| {
+            println("error: insufficient privilege level for operation: CPU level {} instruction {s}", .{
+              payload.priv_level, payload.inst.name,
+            });
+            break;
+          },
+          else => {
+            println("error: unknown error {any}", .{ ret });
             break;
           },
         }
