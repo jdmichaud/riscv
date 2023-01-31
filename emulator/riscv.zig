@@ -158,7 +158,7 @@ const instructionSet = [_]Instruction{
   // Zicsr extension
   .{ .name = "CSRRW",   .opcode = 0b1110011, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrw },
   .{ .name = "CSRRS",   .opcode = 0b1110011, .funct3 = 0b010, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrs },
-  .{ .name = "CSRRC",   .opcode = 0b1110011, .funct3 = 0b011, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
+  .{ .name = "CSRRC",   .opcode = 0b1110011, .funct3 = 0b011, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrc },
   .{ .name = "CSRRWI",  .opcode = 0b1110011, .funct3 = 0b101, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrwi },
   .{ .name = "CSRRSI",  .opcode = 0b1110011, .funct3 = 0b110, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
   .{ .name = "CSRRCI",  .opcode = 0b1110011, .funct3 = 0b111, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
@@ -529,7 +529,7 @@ fn sh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn sw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
-  std.log.debug("sw x{}(0x{x:0>8}), x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8})", .{
+  std.log.debug("sw x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
     params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -808,6 +808,11 @@ fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   cpu.pc += 4;
 }
 
+fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
+  _ = instruction;
+  const params = fetchI(packets);
+}
+
 fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
@@ -1055,21 +1060,35 @@ pub fn main() !u8 {
 
   // Start the emulation.
   while (true) {
-    switch ((try cycle(&cpu)).?) {
-      ErrCode.UnknownInstruction => |code| {
-        dump_cpu(cpu);
-        println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
-          code.opcode, code.funct3, code.funct7,
-        });
-        return 1;
-      },
-      ErrCode.InstructionNotImplemented => |payload| {
-        dump_cpu(cpu);
-        println("error: instruction not implemented: {s} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
-          payload.inst.name, payload.code.opcode, payload.code.funct3, payload.code.funct7,
-        });
-        return 2;
-      },
+    if (try cycle(&cpu)) |ret| {
+      switch (ret) {
+        ErrCode.UnknownInstruction => |code| {
+          dump_cpu(cpu);
+          println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
+            code.opcode, code.funct3, code.funct7,
+          });
+          return 1;
+        },
+        ErrCode.InstructionNotImplemented => |payload| {
+          dump_cpu(cpu);
+          println("error: instruction not implemented: {s} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
+            payload.inst.name, payload.code.opcode, payload.code.funct3, payload.code.funct7,
+          });
+          return 2;
+        },
+        ErrCode.InsufficientPrivilegeMode => |payload| {
+          dump_cpu(cpu);
+          println("error: insufficient privilege level for operation: CPU level {} instruction {s}", .{
+            payload.priv_level, payload.inst.name,
+          });
+          return 3;
+        },
+        ErrCode.UnhandledTrapVectorMode => |payload| {
+          dump_cpu(cpu);
+          println("error: Unhandled trap vector mode {any}", .{ payload });
+          return 4;
+        },
+      }
     }
   }
 

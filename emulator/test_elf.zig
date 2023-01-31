@@ -32,6 +32,7 @@ fn load_elf(allocator: std.mem.Allocator, filename: []const u8, mem: []u8) !void
   //   println("{s} @0x{x:0>8}+0x{x:0>8}(0x{x:0>8})", .{ name, section.sh_addr, section.sh_offset, section.sh_size });
   //   println(" {any}", .{ section });
   // }
+  // Load all the program headers into the CPU memory.
   var program_headers = elf_hdr.program_header_iterator(elf_file);
   while (try program_headers.next()) |section| {
     std.log.debug("@0x{x:0>8}(@0x{x:0>8}) -> @0x{x:0>8}(@0x{x:0>8})", .{ section.p_offset, section.p_filesz, section.p_vaddr, section.p_filesz });
@@ -40,9 +41,17 @@ fn load_elf(allocator: std.mem.Allocator, filename: []const u8, mem: []u8) !void
 }
 
 pub const std_options = struct {
-  pub const log_level = .debug;
-  // pub const log_level = .info;
+  // pub const log_level = .debug;
+  pub const log_level = .info;
 };
+
+fn getValueFromMem(comptime T: type, cpu: riscv.RiscVCPU(T), address: T) T {
+  return @as(u32, cpu.mem[address]) |
+    (@as(u32, cpu.mem[address + 1]) << 8) |
+    (@as(u32, cpu.mem[address + 2]) << 16) |
+    (@as(u32, cpu.mem[address + 3]) << 24)
+  ;
+}
 
 pub fn main() !void {
   var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -55,6 +64,7 @@ pub fn main() !void {
   var mem = try allocator.alloc(u8, 1024 * 1024 * 64); // 4K addressable memory
 
   var fails: u16 = 0;
+  var passes: u16 = 0;
   for (args[1..]) |fixture_file| {
     // Create a CPU
     var cpu: riscv.RiscVCPU(u32) = .{
@@ -67,7 +77,7 @@ pub fn main() !void {
     };
     std.mem.set(u8, cpu.raw_mem, 0);
 
-    println("executing {s}...", .{ fixture_file });
+    print("executing {s}...", .{ fixture_file });
     try load_elf(allocator, fixture_file, cpu.mem);
     while (true) {
       if (riscv.cycle(&cpu) catch { fails += 1; break; }) |ret| {
@@ -98,7 +108,18 @@ pub fn main() !void {
           },
         }
       }
+      // Check test status
+      const return_code = getValueFromMem(u32, cpu, 0x80001000);
+      if (return_code == 1) {
+        passes += 1;
+        println(" OK", .{});
+        break;
+      } else if (return_code != 0) {
+        println(" KO on test_{}", .{ return_code });
+        fails += 1;
+        break;
+      }
     }
-    println("{} FAILS / {} TOTAL", .{ fails, args.len - 1 });
+    println("{} PASS / {} FAILS / {} TOTAL", .{ passes, fails, fails + passes });
   }
 }
