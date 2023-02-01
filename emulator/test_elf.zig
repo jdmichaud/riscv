@@ -40,9 +40,22 @@ fn load_elf(allocator: std.mem.Allocator, filename: []const u8, mem: []u8) !void
   }
 }
 
+pub fn myLogFn(
+  comptime message_level: std.log.Level,
+  comptime scope: @Type(.EnumLiteral),
+  comptime format: []const u8,
+  args: anytype,
+) void {
+  _ = message_level;
+  _ = scope;
+  println(format, args);
+}
+
 pub const std_options = struct {
   // pub const log_level = .debug;
   pub const log_level = .info;
+
+  pub const logFn = myLogFn;
 };
 
 fn getValueFromMem(comptime T: type, cpu: riscv.RiscVCPU(T), address: T) T {
@@ -108,6 +121,9 @@ pub fn main() !void {
           },
         }
       }
+      if (std_options.log_level == .debug) {
+        riscv.dump_cpu(cpu); println("", .{});
+      }
       // Check test status
       const return_code = getValueFromMem(u32, cpu, 0x80001000);
       if (return_code == 1) {
@@ -115,7 +131,7 @@ pub fn main() !void {
         println(" OK", .{});
         break;
       } else if (return_code != 0) {
-        println(" KO on test_{}", .{ return_code });
+        println(" KO on test_{}", .{ return_code >> 1 });
         fails += 1;
         break;
       }
