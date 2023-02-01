@@ -174,7 +174,7 @@ const CSRSet = [_]CSR{
   .{ .name = "mconfigptr",     .index = 0xF15, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Pointer to configuration data structure" },
 // Machine Trap Setup
   .{ .name = "mstatus",        .index = 0x300, .flags = MRW, .setter = setMStatus,  .getter = getCSR, .description = "Machine status register" },
-  .{ .name = "misa",           .index = 0x301, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "ISA and extension" },
+  .{ .name = "misa",           .index = 0x301, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "ISA and extension" },
   .{ .name = "medeleg",        .index = 0x302, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine exception delegation register" },
   .{ .name = "mideleg",        .index = 0x303, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine interrupt delegation register" },
   .{ .name = "mie",            .index = 0x304, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine interrupt-enable register" },
@@ -593,6 +593,13 @@ fn getCSR(self: CSR, csrs: [4096]u32) u32 {
   return csrs[self.index];
 }
 
+fn setNop(self: CSR, csrs: *[4096]u32, value: u32) void {
+  _ = self;
+  _ = csrs;
+  _ = value;
+  // Noop
+}
+
 // From here some specific CSR getter and setter
 fn setMStatus(self: CSR, csrs: *[4096]u32, value: u32) void {
   std.log.debug("set mstatus from 0x{x:0>8} to 0x{x:0>8}", .{ csrs[self.index], value });
@@ -604,7 +611,7 @@ fn setMStatus(self: CSR, csrs: *[4096]u32, value: u32) void {
 pub const rv32_initial_csr_values = [_]std.meta.Tuple(&.{ usize, u32 }) {
   .{ 0xF14, 0x00000000 }, // // riscv-privileged-20211203.pdf Ch. 3.1.5 Hart ID Register (mhardid)
   // This is set to 32 bits with I extension.
-  .{ 0x301, 0x40000100 }, // riscv-privileged-20211203.pdf Ch. 3.1.1 Machine ISA Refister (misa)
+  .{ 0x301, 0x40000100 }, // riscv-privileged-20211203.pdf Ch. 3.1.1 Machine ISA Register (misa)
   // MIE (Machine Interrupt Enabled) and MPIE (Machine Previous Interrupt Enabled) are set to true.
   // MPP (Machine Previous Privilege) is set to 11 for Machine mode.
   .{ 0x300, 0x00001888 }, // riscv-privileged-20211203.pdf Ch. 3.1.6 Machine Status Register (mstatus)
@@ -620,5 +627,7 @@ pub fn init_csr(comptime T: type, values: []const std.meta.Tuple(&.{ usize, u32 
 }
 
 pub const MCauseExceptionCode = enum(u32) {
+  InstructionAddressMisaligned = 0x00000000,
+  IllegalInstruction = 0x00000002,
   MachineModeEnvCall = 0x0000000B,
 };

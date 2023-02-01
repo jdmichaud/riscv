@@ -160,8 +160,8 @@ const instructionSet = [_]Instruction{
   .{ .name = "CSRRS",   .opcode = 0b1110011, .funct3 = 0b010, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrs },
   .{ .name = "CSRRC",   .opcode = 0b1110011, .funct3 = 0b011, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrc },
   .{ .name = "CSRRWI",  .opcode = 0b1110011, .funct3 = 0b101, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrwi },
-  .{ .name = "CSRRSI",  .opcode = 0b1110011, .funct3 = 0b110, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
-  .{ .name = "CSRRCI",  .opcode = 0b1110011, .funct3 = 0b111, .funct7 = null,      .format = InstructionFormat.I, .handler = nullHandler },
+  .{ .name = "CSRRSI",  .opcode = 0b1110011, .funct3 = 0b110, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrsi },
+  .{ .name = "CSRRCI",  .opcode = 0b1110011, .funct3 = 0b111, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrci },
 };
 
 // A RiscVCPU(T) RISC-V processor is a program counter of Tbits width, 32 Tbits
@@ -285,8 +285,8 @@ fn noop(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn lui(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchU(packets);
-  std.log.debug("lui rd (0x{x:8>0}), imm (0x{x:8>0})", .{ params.rd, params.imm });
-  cpu.rx[params.rd] = params.imm << 12 & 0xFFFFF000;
+  std.log.debug("0x{x:0>8}: lui x{}, imm (0x{x:0>8})", .{ cpu.pc, params.rd, params.imm });
+  cpu.rx[params.rd] = (params.imm << 12) & 0xFFFFF000;
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -294,8 +294,8 @@ fn lui(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn auipc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchU(packets);
-  std.log.debug("auipc rd (0x{x:8>0}), 0x{x:8>0} (0x{x:8>0})", .{
-    params.rd, params.imm, cpu.pc +% ((params.imm << 12) & 0xFFFFF000),
+  std.log.debug("0x{x:0>8}: auipc rd (0x{x:0>8}), 0x{x:0>8} (0x{x:0>8})", .{
+    cpu.pc, params.rd, params.imm, cpu.pc +% ((params.imm << 12) & 0xFFFFF000),
   });
   cpu.rx[params.rd] = cpu.pc +% ((params.imm << 12) & 0xFFFFF000);
   cpu.rx[0] = 0;
@@ -306,33 +306,49 @@ fn jal(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   _ = instruction;
   const params = fetchJ(packets);
   const offset = if (params.imm & 0x00100000 == 0) params.imm else (params.imm | 0xFFF00000);
-  std.log.debug("jal rd (0x{x}), offset (0x{x})", .{ params.rd, offset });
-  cpu.rx[params.rd] = cpu.pc + 4;
-  cpu.pc +%= offset;
+  std.log.debug("0x{x:0>8}: jal rd (0x{x:0>8}), offset (0x{x:0>8})", .{ cpu.pc, params.rd, offset });
+  const nextpc = cpu.pc +% offset;
+  if (nextpc % @sizeOf(u32) == 0) {
+    cpu.rx[params.rd] = cpu.pc + 4;
+    cpu.rx[0] = 0;
+    cpu.pc = nextpc;
+  } else {
+    instructionAddressMisaligned(nextpc, cpu);
+  }
 }
 
 fn jalr(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("jalr x{}(0x{x}), x{}(0x{x}, 0x{x}", .{
-    params.rd, cpu.rx[params.rd], params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: jalr x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, cpu.rx[params.rd], params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const pc = cpu.pc;
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
-  cpu.pc = (cpu.rx[params.rs1] +% offset) & 0xFFFFFFFE;
-  cpu.rx[params.rd] = pc + 4;
-  cpu.rx[0] = 0;
+  const nextpc = (cpu.rx[params.rs1] +% offset) & 0xFFFFFFFE;
+  if (nextpc % @sizeOf(u32) == 0) {
+    cpu.rx[params.rd] = pc + 4;
+    cpu.rx[0] = 0;
+    cpu.pc = nextpc;
+  } else {
+    instructionAddressMisaligned(nextpc, cpu);
+  }
 }
 
 fn beq(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("beq x{}(0x{x}), x{}(0x{x}), 0x{x} ({})", .{
-    params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: beq x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (cpu.rx[params.rs1] == cpu.rx[params.rs2]) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
-    cpu.pc = cpu.pc +% offset;
+    const nextpc = cpu.pc +% offset;
+    if (nextpc % @sizeOf(u32) == 0) {
+      cpu.pc = nextpc;
+    } else {
+      instructionAddressMisaligned(nextpc, cpu);
+    }
   } else {
     cpu.pc += 4;
   }
@@ -341,12 +357,17 @@ fn beq(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn bne(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("bne x{}(0x{x}), x{}(0x{x}), 0x{x} ({})", .{
-    params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: bne x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (cpu.rx[params.rs1] != cpu.rx[params.rs2]) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
-    cpu.pc = cpu.pc +% offset;
+    const nextpc = cpu.pc +% offset;
+    if (nextpc % @sizeOf(u32) == 0) {
+      cpu.pc = nextpc;
+    } else {
+      instructionAddressMisaligned(nextpc, cpu);
+    }
   } else {
     cpu.pc += 4;
   }
@@ -355,12 +376,17 @@ fn bne(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn blt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("blt x{}(0x{x}), x{}(0x{x}), 0x{x} ({})", .{
-    params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: blt x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (@bitCast(i32, cpu.rx[params.rs1]) < @bitCast(i32, cpu.rx[params.rs2])) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
-    cpu.pc = cpu.pc +% offset;
+    const nextpc = cpu.pc +% offset;
+    if (nextpc % @sizeOf(u32) == 0) {
+      cpu.pc = nextpc;
+    } else {
+      instructionAddressMisaligned(nextpc, cpu);
+    }
   } else {
     cpu.pc += 4;
   }
@@ -369,12 +395,17 @@ fn blt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn bge(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("bge x{}(0x{x}), x{}(0x{x}), 0x{x} ({})", .{
-    params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: bge x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (@bitCast(i32, cpu.rx[params.rs1]) >= @bitCast(i32, cpu.rx[params.rs2])) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
-    cpu.pc = cpu.pc +% offset;
+    const nextpc = cpu.pc +% offset;
+    if (nextpc % @sizeOf(u32) == 0) {
+      cpu.pc = nextpc;
+    } else {
+      instructionAddressMisaligned(nextpc, cpu);
+    }
   } else {
     cpu.pc += 4;
   }
@@ -383,12 +414,17 @@ fn bge(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn bltu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("bltu x{}(0x{x}), x{}(0x{x}), 0x{x} ({})", .{
-    params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: bltu x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (cpu.rx[params.rs1] < cpu.rx[params.rs2]) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
-    cpu.pc = cpu.pc +% offset;
+    const nextpc = cpu.pc +% offset;
+    if (nextpc % @sizeOf(u32) == 0) {
+      cpu.pc = nextpc;
+    } else {
+      instructionAddressMisaligned(nextpc, cpu);
+    }
   } else {
     cpu.pc += 4;
   }
@@ -397,12 +433,17 @@ fn bltu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn bgeu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("bgeu x{}(0x{x}), x{}(0x{x}), 0x{x} ({})", .{
-    params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: bgeu x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (cpu.rx[params.rs1] >= cpu.rx[params.rs2]) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
-    cpu.pc = cpu.pc +% offset;
+    const nextpc = cpu.pc +% offset;
+    if (nextpc % @sizeOf(u32) == 0) {
+      cpu.pc = nextpc;
+    } else {
+      instructionAddressMisaligned(nextpc, cpu);
+    }
   } else {
     cpu.pc += 4;
   }
@@ -411,8 +452,8 @@ fn bgeu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn addi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("addi x{}, x{}(0x{x}), 0x{x}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: addi x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm: u32 = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.rx[params.rd] = cpu.rx[params.rs1] +% imm;
@@ -423,8 +464,8 @@ fn addi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn lb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("lb x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: lb x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
     cpu.rx[params.rs1] + params.imm, cpu.mem[cpu.rx[params.rs1] + params.imm],
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -440,8 +481,8 @@ fn lb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn lh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("lh x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: lh x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
     cpu.rx[params.rs1] + params.imm, cpu.mem[cpu.rx[params.rs1] + params.imm],
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -458,8 +499,8 @@ fn lh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn lw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("lw x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: lw x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
     cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -476,8 +517,8 @@ fn lw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn lbu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("lbu x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: lbu x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
     cpu.rx[params.rs1] + params.imm, cpu.mem[cpu.rx[params.rs1] + params.imm],
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -490,8 +531,8 @@ fn lbu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("lhu x{}, x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: lhu x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
     cpu.rx[params.rs1] + params.imm, cpu.mem[cpu.rx[params.rs1] + params.imm],
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -504,8 +545,8 @@ fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
-  std.log.debug("sb x{}(0x{x:0>8}), x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8})", .{
-    params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
+  std.log.debug("0x{x:0>8}: sb x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
+    cpu.pc, params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.mem[cpu.rx[params.rs1] +% offset] = @intCast(u8, cpu.rx[params.rs2] & 0x000000FF);
@@ -515,8 +556,8 @@ fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn sh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
-  std.log.debug("sh x{}(0x{x:0>8}), x{}(0x{x} + 0x{x:0>8} = 0x{x:0>8})", .{
-    params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
+  std.log.debug("0x{x:0>8}: sh x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
+    cpu.pc, params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
@@ -529,8 +570,8 @@ fn sh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn sw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
-  std.log.debug("sw x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
-    params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
+  std.log.debug("0x{x:0>8}: sw x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
+    cpu.pc, params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
@@ -545,8 +586,8 @@ fn sw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
 fn slti(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("slti x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: slti x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm: i32 = @bitCast(i32, if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800));
   cpu.rx[params.rd] = if (@bitCast(i32, cpu.rx[params.rs1]) < imm) 1 else 0;
@@ -557,8 +598,8 @@ fn slti(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn sltiu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("sltiu x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: sltiu x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.rx[params.rd] = if (cpu.rx[params.rs1] < imm) 1 else 0;
@@ -569,8 +610,8 @@ fn sltiu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn xori(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("xori x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: xori x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.rx[params.rd] = cpu.rx[params.rs1] ^ imm;
@@ -581,8 +622,8 @@ fn xori(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn ori(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("ori x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: ori x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.rx[params.rd] = cpu.rx[params.rs1] | imm;
@@ -593,8 +634,8 @@ fn ori(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn andi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("andi x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: andi x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.rx[params.rd] = cpu.rx[params.rs1] & imm;
@@ -605,8 +646,8 @@ fn andi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn slli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("slli x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: slli x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
   cpu.rx[params.rd] = cpu.rx[params.rs1] << imm;
@@ -617,8 +658,8 @@ fn slli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn srli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("srli x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: srli x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
   cpu.rx[params.rd] = cpu.rx[params.rs1] >> imm;
@@ -629,8 +670,8 @@ fn srli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn srai(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("srai x{}, x{}(0x{x}, 0x{x:0>8}", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: srai x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
   const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
   // Right shift will copy the original sign bit into the shift if the operand is signed.
@@ -642,8 +683,8 @@ fn srai(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn add(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("add x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: add x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = cpu.rx[params.rs1] +% cpu.rx[params.rs2];
   cpu.rx[0] = 0;
@@ -653,8 +694,8 @@ fn add(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sub(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("sub x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: sub x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = cpu.rx[params.rs1] -% cpu.rx[params.rs2];
   cpu.rx[0] = 0;
@@ -664,8 +705,8 @@ fn sub(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sll(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("sll x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: sll x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
   cpu.rx[params.rd] = cpu.rx[params.rs1] << shift;
@@ -676,8 +717,8 @@ fn sll(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn slt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("slt x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: slt x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = if (@bitCast(i32, cpu.rx[params.rs1]) < @bitCast(i32, cpu.rx[params.rs2])) 1 else 0;
   cpu.rx[0] = 0;
@@ -687,8 +728,8 @@ fn slt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sltu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("sltu x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: sltu x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = if (cpu.rx[params.rs1] < cpu.rx[params.rs2]) 1 else 0;
   cpu.rx[0] = 0;
@@ -698,8 +739,8 @@ fn sltu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn xor(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("xor x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: xor x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = cpu.rx[params.rs1] ^ cpu.rx[params.rs2];
   cpu.rx[0] = 0;
@@ -709,8 +750,8 @@ fn xor(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn srl(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("srl x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: srl x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
   cpu.rx[params.rd] = cpu.rx[params.rs1] >> shift;
@@ -721,8 +762,8 @@ fn srl(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sra(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("sra x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: sra x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
   cpu.rx[params.rd] = @bitCast(u32, @bitCast(i32, cpu.rx[params.rs1]) >> shift);
@@ -733,8 +774,8 @@ fn sra(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn or_(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("or x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: or x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = cpu.rx[params.rs1] | cpu.rx[params.rs2];
   cpu.rx[0] = 0;
@@ -744,14 +785,16 @@ fn or_(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn and_(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("and x{}, x{}(0x{x}), x{}(0x{x})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: and x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = cpu.rx[params.rs1] & cpu.rx[params.rs2];
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
 
+// ecall is the equivalent of raising an interruption. In fact, interruptions
+// can use ecall as a template.
 fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
@@ -759,7 +802,7 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
     // EBREAK
     return RiscError.InstructionNotImplemented;
   }
-  std.log.debug("ecall", .{});
+  std.log.debug("0x{x:0>8}: ecall", .{ cpu.pc });
   // From https://mullerlee.cyou/2020/07/09/riscv-exception-interrupt/
   // update mcause with is_interupt and exception_code
   csr.csrRegistry[csr.mcause].set(&cpu.csr, @enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall));
@@ -779,7 +822,7 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   _ = packets;
-  std.log.debug("mret mpec = 0x{x:0>8}", .{ cpu.csr[0x341] });
+  std.log.debug("0x{x:0>8}: mret mpec = 0x{x:0>8}", .{ cpu.pc, cpu.csr[0x341] });
   // riscv-privileged-20211203.pdf Ch. 3.1.6 Machine Status Register (mstatus)
   // Set privilege mode to Machine Previous Privilege (MPP) mode as set in the mstatus register.
   cpu.priv_level = @intCast(u3, (csr.csrRegistry[csr.mstatus].get(cpu.csr) & 0x00001800) >> 11);
@@ -794,15 +837,16 @@ fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("csrrs x{}, x{}(0x{x}), 0x{x:0>8} ({s})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
   }
+  const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) | cpu.rx[params.rs1]);
+    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) | initial_value);
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -811,20 +855,34 @@ fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
+  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  });
+  if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
+    return RiscError.InsufficientPrivilegeMode;
+  }
+  const initial_value = cpu.rx[params.rs1];
+  cpu.rx[params.rd] = cpu.csr[params.imm];
+  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) & (~initial_value));
+  }
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
 }
 
 fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("csrrw x{}, x{}(0x{x}), 0x{x:0>8} ({s})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrw x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
   }
+  const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, cpu.rx[params.rs1]);
+    csr.csrRegistry[params.imm].set(&cpu.csr, initial_value);
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -833,31 +891,74 @@ fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("csrrwi x{}, x{}(0x{x}), 0x{x:0>8} ({s})", .{
-    params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrwi x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
   }
+  const initial_value = params.rs1;
+  cpu.rx[params.rd] = csr.csrRegistry[params.imm].get(cpu.csr);
+  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+    csr.csrRegistry[params.imm].set(&cpu.csr, initial_value);
+  }
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
+}
+
+fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
+  _ = instruction;
+  const params = fetchI(packets);
+  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  });
+  if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
+    return RiscError.InsufficientPrivilegeMode;
+  }
+  const initial_value = params.rs1;
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, params.rs1);
+    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) | initial_value);
+  }
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
+}
+
+fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
+  _ = instruction;
+  const params = fetchI(packets);
+  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  });
+  if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
+    return RiscError.InsufficientPrivilegeMode;
+  }
+  const initial_value = params.rs1;
+  cpu.rx[params.rd] = cpu.csr[params.imm];
+  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) & (~initial_value));
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
 
 pub fn dump_cpu(cpu: RiscVCPU(u32)) void {
-  println("x0     = 0x{x:0>8} x8     = 0x{x:0>8} x16 = 0x{x:0>8} x24 = 0x{x:0>8}", .{ cpu.rx[0 ], cpu.rx[8 ], cpu.rx[16], cpu.rx[24] });
-  println("x1     = 0x{x:0>8} x9     = 0x{x:0>8} x17 = 0x{x:0>8} x25 = 0x{x:0>8}", .{ cpu.rx[1 ], cpu.rx[9 ], cpu.rx[17], cpu.rx[25] });
-  println("x2     = 0x{x:0>8} x10    = 0x{x:0>8} x18 = 0x{x:0>8} x26 = 0x{x:0>8}", .{ cpu.rx[2 ], cpu.rx[10], cpu.rx[18], cpu.rx[26] });
-  println("x3     = 0x{x:0>8} x11    = 0x{x:0>8} x19 = 0x{x:0>8} x27 = 0x{x:0>8}", .{ cpu.rx[3 ], cpu.rx[11], cpu.rx[19], cpu.rx[27] });
-  println("x4     = 0x{x:0>8} x12    = 0x{x:0>8} x20 = 0x{x:0>8} x28 = 0x{x:0>8}", .{ cpu.rx[4 ], cpu.rx[12], cpu.rx[20], cpu.rx[28] });
-  println("x5     = 0x{x:0>8} x13    = 0x{x:0>8} x21 = 0x{x:0>8} x29 = 0x{x:0>8}", .{ cpu.rx[5 ], cpu.rx[13], cpu.rx[21], cpu.rx[29] });
-  println("x6     = 0x{x:0>8} x14    = 0x{x:0>8} x22 = 0x{x:0>8} x30 = 0x{x:0>8}", .{ cpu.rx[6 ], cpu.rx[14], cpu.rx[22], cpu.rx[30] });
-  println("x7     = 0x{x:0>8} x15    = 0x{x:0>8} x23 = 0x{x:0>8} x31 = 0x{x:0>8}", .{ cpu.rx[7 ], cpu.rx[15], cpu.rx[23], cpu.rx[31] });
+  const register_name = [_][]const u8{
+    "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1",
+    "a2", "a3", "a4", "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8",
+    "s9", "s10", "s11", "t3", "t4", "t5", "t6",
+  };
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[0 ], cpu.rx[0 ], register_name[8 ], cpu.rx[8 ], register_name[16], cpu.rx[16], register_name[24], cpu.rx[24] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[1 ], cpu.rx[1 ], register_name[9 ], cpu.rx[9 ], register_name[17], cpu.rx[17], register_name[25], cpu.rx[25] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[2 ], cpu.rx[2 ], register_name[10], cpu.rx[10], register_name[18], cpu.rx[18], register_name[26], cpu.rx[26] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[3 ], cpu.rx[3 ], register_name[11], cpu.rx[11], register_name[19], cpu.rx[19], register_name[27], cpu.rx[27] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[4 ], cpu.rx[4 ], register_name[12], cpu.rx[12], register_name[20], cpu.rx[20], register_name[28], cpu.rx[28] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[5 ], cpu.rx[5 ], register_name[13], cpu.rx[13], register_name[21], cpu.rx[21], register_name[29], cpu.rx[29] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[6 ], cpu.rx[6 ], register_name[14], cpu.rx[14], register_name[22], cpu.rx[22], register_name[30], cpu.rx[30] });
+  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[7 ], cpu.rx[7 ], register_name[15], cpu.rx[15], register_name[23], cpu.rx[23], register_name[31], cpu.rx[31] });
   println("pc     = 0x{x:0>8}", .{ cpu.pc });
-  println("mstatus= 0x{x:0>8} mtvec  = 0x{x:0>8}", .{ cpu.csr[0x300], cpu.csr[0x305] });
+  println("mstatus= 0x{x:0>8} mtvec  = 0x{x:0>8} mscratch = 0x{x:0>8} mtval = 0x{x:0>8}", .{ cpu.csr[csr.mstatus], cpu.csr[csr.mtvec], cpu.csr[csr.mscratch], cpu.csr[csr.mtval] });
+  println("mepc   = 0x{x:0>8} mcause = 0x{x:0>8}", .{ cpu.csr[csr.mepc], cpu.csr[csr.mcause] });
 }
 
 // https://github.com/ziglang/zig/blob/6b3f59c3a735ddbda3b3a62a0dfb5d55fa045f57/lib/std/comptime_string_map.zig
@@ -924,6 +1025,25 @@ pub const ErrCode = union(enum) {
   UnhandledTrapVectorMode: struct { code: Code },
 };
 
+fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
+  csr.csrRegistry[csr.mcause].set(&cpu.csr, cause);
+  csr.csrRegistry[csr.mtval].set(&cpu.csr, mtval);
+  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) | (@intCast(u32, cpu.priv_level) << 11));
+  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) & 0xFFFFFFF7);
+  csr.csrRegistry[csr.mepc].set(&cpu.csr, cpu.pc);
+  cpu.pc = csr.csrRegistry[csr.mtvec].get(cpu.csr);
+}
+
+fn illegalInstruction(packets: u32, cpu: *RiscVCPU(u32)) void {
+  std.log.debug("Illegal instruction 0x{x:0>8} @ 0x{x:0>8}", .{ packets, cpu.pc });
+  exception(@enumToInt(csr.MCauseExceptionCode.IllegalInstruction), packets, cpu);
+}
+
+fn instructionAddressMisaligned(badaddress: u32, cpu: *RiscVCPU(u32)) void {
+  std.log.debug("Instruction address misaligned @ 0x{x:0>8}", .{ cpu.pc });
+  exception(@enumToInt(csr.MCauseExceptionCode.InstructionAddressMisaligned), badaddress, cpu);
+}
+
 fn inc_cycle(cpu: *RiscVCPU(u32)) void {
   cpu.csr[0xB00] = cpu.csr[0xB00] +% 1;
   if (cpu.csr[0xB00] == 0) {
@@ -935,20 +1055,23 @@ fn inc_cycle(cpu: *RiscVCPU(u32)) void {
 }
 
 pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
+  // If we do not handle compressed instruction, all instructions address must be aligned
+  if (cpu.pc % @sizeOf(u32) != 0) {
+    instructionAddressMisaligned(cpu.pc, cpu);
+  }
   var packets: u32 = cpu.mem[cpu.pc] |
     @as(u32, cpu.mem[cpu.pc + 1]) << 8 |
     @as(u32, cpu.mem[cpu.pc + 2]) << 16 |
     @as(u32, cpu.mem[cpu.pc + 3]) << 24;
-  std.log.debug("0x{x:0>8} @ 0x{x:0>8}", .{ packets, cpu.pc });
 
   const code = fetch(packets);
   const inst = decode(code.opcode, code.funct3, code.funct7) catch |err| {
     _ = switch (err) {
       GetInstruction.UnknownInstruction => {
-        return ErrCode{ .UnknownInstruction = code };
+        illegalInstruction(packets, cpu);
       },
     };
-    return err;
+    return null;
   };
   inst.handler(inst, cpu, packets) catch |err| {
     _ = switch (err) {
@@ -987,6 +1110,11 @@ fn loadfile(filename: []const u8) ![]align(std.mem.page_size) u8 {
 
   return buffer;
 }
+
+pub const std_options = struct {
+  pub const log_level = .debug;
+  // pub const log_level = .info;
+};
 
 pub fn main() !u8 {
   var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -1033,7 +1161,7 @@ pub fn main() !u8 {
     };
     // Expand memory to make room for the DTB.
     options.mem_size = options.mem_size + @intCast(u32, dtb.len);
-    allocator.free(cpu.mem);
+    allocator.free(cpu.raw_mem);
     cpu.raw_mem = try allocator.alloc(u8, options.mem_size);
     cpu.mem = (cpu.raw_mem.ptr - options.page_offset)[0..options.page_offset + options.mem_size];
     // Load the DTB at the end of the memory to ensure that the kernel never
@@ -1044,19 +1172,12 @@ pub fn main() !u8 {
     // According to https://www.sifive.com/blog/all-aboard-part-6-booting-a-risc-v-linux-kernel
     // linux expects the core id in a0 and the address to the DTB in a1.
     cpu.rx[10] = 0; // a0
-    cpu.rx[11] = dtb_addr + options.page_offset; // a1
+    std.log.debug("dtb_addr 0x{x:0>8} options.page_offset 0x{x:0>8}", .{ dtb_addr, options.page_offset });
+    cpu.rx[11] = dtb_addr; // a1
   }
   // Load the executable at the memory start
-  std.mem.copy(u8, cpu.mem, executable);
+  std.mem.copy(u8, cpu.raw_mem, executable);
   std.os.munmap(executable);
-
-  cpu.mem[0xF00] = 0x74; // t
-  cpu.mem[0xF01] = 0x65; // e
-  cpu.mem[0xF02] = 0x73; // s
-  cpu.mem[0xF03] = 0x74; // t
-  cpu.mem[0xF04] = 0x00; // t
-  cpu.rx[10] = 0xF05;
-  cpu.rx[11] = 0xF00;
 
   // Start the emulation.
   while (true) {
