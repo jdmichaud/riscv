@@ -1,4 +1,5 @@
 const std = @import("std");
+const riscv = @import("riscv.zig");
 
 // Privilege level. Only Machine mode is mandatory (riscv-privileged-20211203.pdf Ch 1.2)
 // and shall be the mode set after reset (riscv-privileged-20211203.pdf Ch 3).
@@ -32,20 +33,20 @@ pub const CSR = struct {
   name: []const u8,
   index: u12,
   flags: u7,
-  setter: *const fn(self: Self, csrs: *[4096]u32, value: u32) void,
-  getter: *const fn(self: Self, csrs: [4096]u32) u32,
+  setter: *const fn(self: Self, cpu: *riscv.RiscVCPU(u32), value: u32) void,
+  getter: *const fn(self: Self, cpu: riscv.RiscVCPU(u32)) u32,
   description: []const u8,
 
-  pub fn set(self: Self, csrs: *[4096]u32, value: u32) void {
-    self.setter(self, csrs, value);
+  pub fn set(self: Self, cpu: *riscv.RiscVCPU(u32), value: u32) void {
+    self.setter(self, cpu, value);
   }
 
-  pub fn get(self: Self, csrs: [4096]u32) u32 {
-    return self.getter(self, csrs);
+  pub fn get(self: Self, cpu: riscv.RiscVCPU(u32)) u32 {
+    return self.getter(self, cpu);
   }
 };
 
-// Volume II: RISC-V Privileged Architectures V20211203 Ch. 2.2 CRS Listing
+// Volume II: RISC-V Privileged Architectures V20211203 Ch. 2.2 CSR Listing
 const CSRSet = [_]CSR{
 // Unprivileged Floating-Point CSRs
   .{ .name = "fflags",         .index = 0x001, .flags = URW, .setter = setCSR,      .getter = getCSR, .description = "Floating-Point Accrued Exceptions" },
@@ -167,26 +168,26 @@ const CSRSet = [_]CSR{
   .{ .name = "vsip",           .index = 0x244, .flags = HRW, .setter = setCSR,      .getter = getCSR, .description = "Virtual supervisor interrupt pending" },
   .{ .name = "vsatp",          .index = 0x280, .flags = HRW, .setter = setCSR,      .getter = getCSR, .description = "Virtual supervisor address translation and protection" },
 // Machine Information Registers
-  .{ .name = "mvendorid",      .index = 0xF11, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Vendor ID" },
-  .{ .name = "marchid",        .index = 0xF12, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Architecture ID" },
+  .{ .name = "mvendorid",      .index = 0xF11, .flags = MRO, .setter = setNop,      .getter = getCSR, .description = "Vendor ID" },
+  .{ .name = "marchid",        .index = 0xF12, .flags = MRO, .setter = setNop,      .getter = getCSR, .description = "Architecture ID" },
   .{ .name = "mimpid",         .index = 0xF13, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Implementation ID" },
   .{ .name = "mhartid",        .index = 0xF14, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Hardware thread ID" },
   .{ .name = "mconfigptr",     .index = 0xF15, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Pointer to configuration data structure" },
 // Machine Trap Setup
   .{ .name = "mstatus",        .index = 0x300, .flags = MRW, .setter = setMStatus,  .getter = getCSR, .description = "Machine status register" },
   .{ .name = "misa",           .index = 0x301, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "ISA and extension" },
-  .{ .name = "medeleg",        .index = 0x302, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine exception delegation register" },
-  .{ .name = "mideleg",        .index = 0x303, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine interrupt delegation register" },
-  .{ .name = "mie",            .index = 0x304, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine interrupt-enable register" },
+  .{ .name = "medeleg",        .index = 0x302, .flags = MRW, .setter = setCSR,      .getter = getNop, .description = "Machine exception delegation register" },
+  .{ .name = "mideleg",        .index = 0x303, .flags = MRW, .setter = setMideleg,  .getter = getNop, .description = "Machine interrupt delegation register" },
+  .{ .name = "mie",            .index = 0x304, .flags = MRW, .setter = setMie,      .getter = getCSR, .description = "Machine interrupt-enable register" },
   .{ .name = "mtvec",          .index = 0x305, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine trap-handler base address" },
   .{ .name = "mcounteren",     .index = 0x306, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine counter enable" },
-  .{ .name = "mstatush",       .index = 0x310, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Additional machine status register, RV32 only" },
+  .{ .name = "mstatush",       .index = 0x310, .flags = MRW, .setter = setCSR,      .getter = getNop, .description = "Additional machine status register, RV32 only" },
 // Machine Trap Handling
   .{ .name = "mscratch",       .index = 0x340, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Scratch register for machine trap handlers" },
   .{ .name = "mepc",           .index = 0x341, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine exception program counter" },
   .{ .name = "mcause",         .index = 0x342, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine trap cause" },
   .{ .name = "mtval",          .index = 0x343, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine bad address or instruction" },
-  .{ .name = "mip",            .index = 0x344, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine interrupt pending" },
+  .{ .name = "mip",            .index = 0x344, .flags = MRW, .setter = setMip,      .getter = getCSR, .description = "Machine interrupt pending" },
   .{ .name = "mtinst",         .index = 0x34A, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine trap instruction (transformed)" },
   .{ .name = "mtval2",         .index = 0x34B, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine bad guest physical address" },
 // Machine Configuration
@@ -584,26 +585,84 @@ fn generateCSRRegistry() [4096]CSR {
 pub const csrRegistry = generateCSRRegistry();
 
 // Default CSR setter
-fn setCSR(self: CSR, csrs: *[4096]u32, value: u32) void {
-  csrs[self.index] = value;
+fn setCSR(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
+  cpu.csr[self.index] = value;
 }
 
 // Default CSR getter
-fn getCSR(self: CSR, csrs: [4096]u32) u32 {
-  return csrs[self.index];
+fn getCSR(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  return cpu.csr[self.index];
 }
 
-fn setNop(self: CSR, csrs: *[4096]u32, value: u32) void {
+fn setNop(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
   _ = self;
-  _ = csrs;
+  _ = cpu;
   _ = value;
   // Noop
 }
 
+fn getNop(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  _ = cpu;
+  return 0;
+}
+
+pub const MstatusBits = struct {
+  pub const MIE: u32 = 1 <<  3; // riscv-privileged-20211203.pdf Ch. 3.1.6.1
+  pub const MPRV:u32 = 1 << 17; // riscv-privileged-20211203.pdf Ch. 3.1.6.3
+  pub const SUM: u32 = 1 << 18; // riscv-privileged-20211203.pdf Ch. 3.1.6.3
+  pub const MXR: u32 = 1 << 19; // riscv-privileged-20211203.pdf Ch. 3.1.6.3
+  pub const TVM: u32 = 1 << 20; // riscv-privileged-20211203.pdf Ch. 3.1.6.5
+  pub const FS: u32  = 3 << 13; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
+  pub const VS: u32  = 3 <<  9; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
+  pub const XS: u32  = 3 << 15; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
+  pub const SD: u32  = 1 << 31; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
+};
 // From here some specific CSR getter and setter
-fn setMStatus(self: CSR, csrs: *[4096]u32, value: u32) void {
-  std.log.debug("set mstatus from 0x{x:0>8} to 0x{x:0>8}", .{ csrs[self.index], value });
-  csrs[self.index] = value | 0x00001800; // Force MBB to Machine Mode (0b11) for now.
+fn setMStatus(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
+  std.log.debug("set mstatus from 0x{x:0>8} to 0x{x:0>8} MIE {s}", .{
+    cpu.csr[self.index], value, if (cpu.csr[self.index] & MstatusBits.MIE != 0) "enabled" else "disabled" });
+  cpu.csr[self.index] = value | 0x00001800; // Force MBB to Machine Mode (0b11) for now.
+  cpu.csr[self.index] = cpu.csr[self.index] & ~MstatusBits.TVM & ~MstatusBits.MPRV &
+    ~MstatusBits.SUM & ~MstatusBits.MXR & ~MstatusBits.FS & ~MstatusBits.VS &
+    ~MstatusBits.XS & ~MstatusBits.SD; // Force those flags to 0.
+  riscv.checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
+}
+
+fn setMideleg(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
+  _ = self;
+  _ = value;
+  riscv.checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
+}
+
+// riscv-privileged-20211203.pdf Ch. 3.1.9
+pub const MieBits = struct {
+  const SSIE: u32 = 1 <<  1;
+  const MSIE: u32 = 1 <<  3;
+  const STIE: u32 = 1 <<  5;
+  const MTIE: u32 = 1 <<  7;
+  const SEIE: u32 = 1 <<  9;
+  const MEIE: u32 = 1 << 11;
+};
+fn setMie(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
+  cpu.csr[self.index] = value;
+  cpu.csr[self.index] = cpu.csr[self.index] & ~MieBits.SSIE & ~MieBits.STIE & ~MieBits.SEIE;
+  riscv.checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
+}
+
+// riscv-privileged-20211203.pdf Ch. 3.1.9
+pub const MipBits = struct {
+  const SSIP: u32 = 1 <<  1;
+  const MSIP: u32 = 1 <<  3;
+  const STIP: u32 = 1 <<  5;
+  const MTIP: u32 = 1 <<  7;
+  const SEIP: u32 = 1 <<  9;
+  const MEIP: u32 = 1 << 11;
+};
+fn setMip(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
+  cpu.csr[self.index] = value;
+  cpu.csr[self.index] = cpu.csr[self.index] & ~MipBits.SSIP & ~MipBits.STIP & ~MipBits.SEIP;
+  riscv.checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
 }
 
 // These are the initial values for the CSR registry file.
@@ -625,6 +684,15 @@ pub fn init_csr(comptime T: type, values: []const std.meta.Tuple(&.{ usize, u32 
   }
   return tmp;
 }
+
+pub const MCauseInterruptCode = enum(u32) {
+  SupervisorSoftwareInterrupt = 1,
+  MachineSoftwareInterrupt = 3,
+  SupervisorTimerInterrupt = 5,
+  MachineTimerInterrupt = 7,
+  SupervisorExternalInterrupt = 9,
+  MachineExternalInterrupt = 11,
+};
 
 pub const MCauseExceptionCode = enum(u32) {
   InstructionAddressMisaligned = 0x00000000,

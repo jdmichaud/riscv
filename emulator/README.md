@@ -14,32 +14,37 @@ Use `riscv32-buildroot-linux-uclibc-as` to compile barebone assembly program.
 ### Commands
 
 Prepare the toolchain to compile to RISC-V
-```
+```bash
 make toolchain
 ```
 
 Compile the emulator:
-```
+```bash
 zig build-exe -freference-trace riscv.zig
 ```
 
-(Try to) Execute linux:
+Compile device tree source:
+```bash
+dtc mark1.dts -o mark1.dtb
 ```
-./riscv ../buildroot/output/images/Image
+
+(Try to) Execute linux:
+```bash
+./riscv --dtb mark1.dtb ../buildroot/output/images/Image
 ```
 
 Assemble to RISC-V:
-```
+```bash
 ../buildroot/output/host/bin/riscv32-buildroot-linux-uclibc-as tests/strlen.S -r strlen.elf
 ```
 
 Extract binary instruction from ELF:
-```
+```bash
 ../buildroot/output/host/bin/riscv32-buildroot-linux-uclibc-objcopy -O binary strlen.elf strlen
 ```
 
 Disassemble RISC-V binary:
-```
+```bash
 ../buildroot/output/host/bin/riscv32-buildroot-linux-uclibc-objdump --disassemble strlen.elf
 ```
 

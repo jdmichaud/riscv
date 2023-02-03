@@ -1,5 +1,6 @@
 const std = @import("std");
 const riscv = @import("riscv.zig");
+const debug = @import("debug.zig");
 
 fn print(comptime fmt: []const u8, args: anytype) void {
   std.io.getStdOut().writer().print(fmt, args) catch {};
@@ -95,7 +96,7 @@ pub fn main() !void {
     while (true) {
       if (riscv.cycle(&cpu) catch { fails += 1; break; }) |ret| {
         fails += 1;
-        riscv.dump_cpu(cpu);
+        debug.dump_cpu(cpu);
         switch (ret) {
           riscv.ErrCode.UnknownInstruction => |code| {
             println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
@@ -122,7 +123,7 @@ pub fn main() !void {
         }
       }
       if (std_options.log_level == .debug) {
-        riscv.dump_cpu(cpu); println("", .{});
+        debug.dump_cpu(cpu); println("", .{});
       }
       // Check test status
       const return_code = getValueFromMem(u32, cpu, 0x80001000);

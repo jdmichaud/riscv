@@ -1,5 +1,8 @@
 const std = @import("std");
 const csr = @import("csr.zig");
+const debug = @import("debug.zig");
+const register_names = debug.register_names;
+const println = debug.println;
 
 // Re-export some csr api.
 pub const rv32_initial_csr_values = csr.rv32_initial_csr_values;
@@ -27,10 +30,6 @@ const Options = struct {
   exec_filename: []const u8,
   dtb_filename: ?[]const u8, // -d,--dtb
 };
-
-fn println(comptime fmt: []const u8, args: anytype) void {
-  std.io.getStdOut().writer().print(fmt ++ "\n", args) catch {};
-}
 
 fn get_options(args: [][:0]u8) !Options {
   var i: u8 = 1;
@@ -294,8 +293,9 @@ fn lui(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn auipc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchU(packets);
-  std.log.debug("0x{x:0>8}: auipc rd (0x{x:0>8}), 0x{x:0>8} (0x{x:0>8})", .{
-    cpu.pc, params.rd, params.imm, cpu.pc +% ((params.imm << 12) & 0xFFFFF000),
+  std.log.debug("0x{x:0>8}: auipc {s}, 0x{x:0>8} ({s} <= 0x{x:0>8})", .{
+    cpu.pc, register_names[params.rd], params.imm, register_names[params.rd],
+    cpu.pc +% ((params.imm << 12) & 0xFFFFF000),
   });
   cpu.rx[params.rd] = cpu.pc +% ((params.imm << 12) & 0xFFFFF000);
   cpu.rx[0] = 0;
@@ -376,8 +376,8 @@ fn bne(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn blt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("0x{x:0>8}: blt x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
-    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: blt {s}(0x{x:0>8}), {s}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, register_names[params.rs1], cpu.rx[params.rs1], register_names[params.rs2], cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (@bitCast(i32, cpu.rx[params.rs1]) < @bitCast(i32, cpu.rx[params.rs2])) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
@@ -395,8 +395,8 @@ fn blt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn bge(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("0x{x:0>8}: bge x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
-    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: bge {s}(0x{x:0>8}), {s}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, register_names[params.rs1], cpu.rx[params.rs1], register_names[params.rs2], cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (@bitCast(i32, cpu.rx[params.rs1]) >= @bitCast(i32, cpu.rx[params.rs2])) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
@@ -452,8 +452,8 @@ fn bgeu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn addi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: addi x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: addi {s}, {s}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1], params.imm,
   });
   const imm: u32 = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   cpu.rx[params.rd] = cpu.rx[params.rs1] +% imm;
@@ -803,20 +803,7 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
     return RiscError.InstructionNotImplemented;
   }
   std.log.debug("0x{x:0>8}: ecall", .{ cpu.pc });
-  // From https://mullerlee.cyou/2020/07/09/riscv-exception-interrupt/
-  // update mcause with is_interupt and exception_code
-  csr.csrRegistry[csr.mcause].set(&cpu.csr, @enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall));
-  // update mtval with exception-specific information
-  // according to riscv-privileged-20211203.pdf Ch. 3.1.16, mtval contains information on error 0 otherwise.
-  csr.csrRegistry[csr.mtval].set(&cpu.csr, 0);
-  // update mstatus with current mode (also riscv-privileged-20211203.pdf Ch. 3.1.6.1 Privileged and Global Interrupt-enable Stack in mstatus)
-  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) | (@intCast(u32, cpu.priv_level) << 11));
-  // update mstatus to disable interrupt
-  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) & 0xFFFFFFF7);
-  // update mepc with current instruction address (also riscv-privileged-20211203.pdf Ch. 3.3.1 Environment Call and Breakpoint)
-  csr.csrRegistry[csr.mepc].set(&cpu.csr, cpu.pc);
-  // Guessed from https://jborza.com/emulation/2021/04/22/ecalls-and-syscalls.html. Where is this documented?
-  cpu.pc = csr.csrRegistry[csr.mtvec].get(cpu.csr);
+  exception(@enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall), 0, cpu);
 }
 
 fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -825,13 +812,14 @@ fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
   std.log.debug("0x{x:0>8}: mret mpec = 0x{x:0>8}", .{ cpu.pc, cpu.csr[0x341] });
   // riscv-privileged-20211203.pdf Ch. 3.1.6 Machine Status Register (mstatus)
   // Set privilege mode to Machine Previous Privilege (MPP) mode as set in the mstatus register.
-  cpu.priv_level = @intCast(u3, (csr.csrRegistry[csr.mstatus].get(cpu.csr) & 0x00001800) >> 11);
+  cpu.priv_level = @intCast(u3, (csr.csrRegistry[csr.mstatus].get(cpu.*) & 0x00001800) >> 11);
   cpu.priv_level = 0x3; // Force Machine mode which is the only mode implemented right now.
   // Set Machine Previous Interrupt Enabled (MPIE) to 1.
-  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) | 0x00000080);
+  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) | 0x00000080);
   // Set Machine Previous Privilege (MPP) to least privilege mode (now Machine).
-  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) | 0x00001800);
+  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) | 0x00001800);
   cpu.pc = cpu.csr[0x341]; // mepc csr
+  checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
 }
 
 fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -846,7 +834,7 @@ fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) | initial_value);
+    csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) | initial_value);
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -864,7 +852,7 @@ fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) & (~initial_value));
+    csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) & (~initial_value));
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -882,7 +870,7 @@ fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, initial_value);
+    csr.csrRegistry[params.imm].set(cpu, initial_value);
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -898,9 +886,9 @@ fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
     return RiscError.InsufficientPrivilegeMode;
   }
   const initial_value = params.rs1;
-  cpu.rx[params.rd] = csr.csrRegistry[params.imm].get(cpu.csr);
+  cpu.rx[params.rd] = csr.csrRegistry[params.imm].get(cpu.*);
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, initial_value);
+    csr.csrRegistry[params.imm].set(cpu, initial_value);
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -918,7 +906,7 @@ fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   const initial_value = params.rs1;
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) | initial_value);
+    csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) | initial_value);
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -936,29 +924,10 @@ fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   const initial_value = params.rs1;
   cpu.rx[params.rd] = cpu.csr[params.imm];
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
-    csr.csrRegistry[params.imm].set(&cpu.csr, csr.csrRegistry[params.imm].get(cpu.csr) & (~initial_value));
+    csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) & (~initial_value));
   }
   cpu.rx[0] = 0;
   cpu.pc += 4;
-}
-
-pub fn dump_cpu(cpu: RiscVCPU(u32)) void {
-  const register_name = [_][]const u8{
-    "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1",
-    "a2", "a3", "a4", "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8",
-    "s9", "s10", "s11", "t3", "t4", "t5", "t6",
-  };
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[0 ], cpu.rx[0 ], register_name[8 ], cpu.rx[8 ], register_name[16], cpu.rx[16], register_name[24], cpu.rx[24] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[1 ], cpu.rx[1 ], register_name[9 ], cpu.rx[9 ], register_name[17], cpu.rx[17], register_name[25], cpu.rx[25] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[2 ], cpu.rx[2 ], register_name[10], cpu.rx[10], register_name[18], cpu.rx[18], register_name[26], cpu.rx[26] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[3 ], cpu.rx[3 ], register_name[11], cpu.rx[11], register_name[19], cpu.rx[19], register_name[27], cpu.rx[27] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[4 ], cpu.rx[4 ], register_name[12], cpu.rx[12], register_name[20], cpu.rx[20], register_name[28], cpu.rx[28] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[5 ], cpu.rx[5 ], register_name[13], cpu.rx[13], register_name[21], cpu.rx[21], register_name[29], cpu.rx[29] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[6 ], cpu.rx[6 ], register_name[14], cpu.rx[14], register_name[22], cpu.rx[22], register_name[30], cpu.rx[30] });
-  println("{s: <6} = 0x{x:0>8} {s: <6} = 0x{x:0>8} {s: <7} = 0x{x:0>8} {s: <6} = 0x{x:0>8}", .{ register_name[7 ], cpu.rx[7 ], register_name[15], cpu.rx[15], register_name[23], cpu.rx[23], register_name[31], cpu.rx[31] });
-  println("pc     = 0x{x:0>8}", .{ cpu.pc });
-  println("mstatus= 0x{x:0>8} mtvec  = 0x{x:0>8} mscratch = 0x{x:0>8} mtval = 0x{x:0>8}", .{ cpu.csr[csr.mstatus], cpu.csr[csr.mtvec], cpu.csr[csr.mscratch], cpu.csr[csr.mtval] });
-  println("mepc   = 0x{x:0>8} mcause = 0x{x:0>8}", .{ cpu.csr[csr.mepc], cpu.csr[csr.mcause] });
 }
 
 // https://github.com/ziglang/zig/blob/6b3f59c3a735ddbda3b3a62a0dfb5d55fa045f57/lib/std/comptime_string_map.zig
@@ -1025,17 +994,61 @@ pub const ErrCode = union(enum) {
   UnhandledTrapVectorMode: struct { code: Code },
 };
 
+// riscv-privileged-20211203.pdf Ch. 3.1.9
+pub fn checkForInterrupt(cpu: *RiscVCPU(u32)) void {
+  const mip = csr.csrRegistry[csr.mip].get(cpu.*);
+  if (mip != 0) { // is an interrupt is pending?
+    if (cpu.priv_level == @enumToInt(csr.PrivilegeMode.MACHINE) and // If in Machine mode
+      (csr.csrRegistry[csr.mstatus].get(cpu.*) & csr.MstatusBits.MIE) != 0) { // and interrupts are enabled
+      // Fetch the pending interrupt
+      const mie = csr.csrRegistry[csr.mie].get(cpu.*);
+      // Priority order: MEI, MSI, MTI, SEI, SSI, STI according to riscv-privileged-20211203.pdf Ch. 3.1.9
+      if ((mip & mie & 11) != 0) { // External (hardware) interrupt
+        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineExternalInterrupt) & 0x80000000, 0, cpu);
+      }
+      if ((mip & mie &  3) != 0) { // Software interrupt
+        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineSoftwareInterrupt) & 0x80000000, 0, cpu);
+      }
+      if ((mip & mie &  7) != 0) { // Timer interrupt
+        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineTimerInterrupt) & 0x80000000, 0, cpu);
+      }
+
+      // const SSIP = mip &  1;
+      // const STIP = (mip &  5) and (mie &  5);
+      // const SEIP = (mip &  9) and (mie &  9);
+    }
+  }
+}
+
+fn interrupt(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
+  // TODO: What should be done on interrupt? The same thing as an exception?
+  exception(cause, mtval, cpu);
+}
+
 fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
-  csr.csrRegistry[csr.mcause].set(&cpu.csr, cause);
-  csr.csrRegistry[csr.mtval].set(&cpu.csr, mtval);
-  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) | (@intCast(u32, cpu.priv_level) << 11));
-  csr.csrRegistry[csr.mstatus].set(&cpu.csr, csr.csrRegistry[csr.mstatus].get(cpu.csr) & 0xFFFFFFF7);
-  csr.csrRegistry[csr.mepc].set(&cpu.csr, cpu.pc);
-  cpu.pc = csr.csrRegistry[csr.mtvec].get(cpu.csr);
+  // From https://mullerlee.cyou/2020/07/09/riscv-exception-interrupt/
+  // update mcause with is_interupt and exception_code
+  csr.csrRegistry[csr.mcause].set(cpu, cause);
+  // update mtval with exception-specific information
+  // according to riscv-privileged-20211203.pdf Ch. 3.1.16, mtval contains information on error 0 otherwise.
+  csr.csrRegistry[csr.mtval].set(cpu, mtval);
+  // update mstatus with current mode (also riscv-privileged-20211203.pdf Ch. 3.1.6.1 Privileged and Global Interrupt-enable Stack in mstatus)
+  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) | (@intCast(u32, cpu.priv_level) << 11));
+  // update mstatus to disable interrupt
+  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) & 0xFFFFFFF7);
+  // update mepc with current instruction address (also riscv-privileged-20211203.pdf Ch. 3.3.1 Environment Call and Breakpoint)
+  csr.csrRegistry[csr.mepc].set(cpu, cpu.pc);
+  // Guessed from https://jborza.com/emulation/2021/04/22/ecalls-and-syscalls.html. Where is this documented?
+  cpu.pc = csr.csrRegistry[csr.mtvec].get(cpu.*);
 }
 
 fn illegalInstruction(packets: u32, cpu: *RiscVCPU(u32)) void {
-  std.log.debug("Illegal instruction 0x{x:0>8} @ 0x{x:0>8}", .{ packets, cpu.pc });
+  if (std_options.log_level == .debug) {
+    const code = fetch(packets);
+    std.log.debug("Illegal instruction 0x{x:0>8} @ 0x{x:0>8} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
+      packets, cpu.pc, code.opcode, code.funct3, code.funct7,
+    });
+  }
   exception(@enumToInt(csr.MCauseExceptionCode.IllegalInstruction), packets, cpu);
 }
 
@@ -1044,7 +1057,7 @@ fn instructionAddressMisaligned(badaddress: u32, cpu: *RiscVCPU(u32)) void {
   exception(@enumToInt(csr.MCauseExceptionCode.InstructionAddressMisaligned), badaddress, cpu);
 }
 
-fn inc_cycle(cpu: *RiscVCPU(u32)) void {
+fn incrementCycle(cpu: *RiscVCPU(u32)) void {
   cpu.csr[0xB00] = cpu.csr[0xB00] +% 1;
   if (cpu.csr[0xB00] == 0) {
     cpu.csr[0xB80] = cpu.csr[0xB80] +% 1;
@@ -1052,6 +1065,9 @@ fn inc_cycle(cpu: *RiscVCPU(u32)) void {
   // TODO: minstret is probably not equal to cycle though.
   cpu.csr[0xB02] = cpu.csr[0xB00];
   cpu.csr[0xB82] = cpu.csr[0xB80];
+  // if (cpu.csr[0xB00] % 1000000 == 0) {
+  //   debug.dump_cpu(cpu.*);
+  // }
 }
 
 pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
@@ -1089,7 +1105,7 @@ pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
   };
   // TODO: Find a way to keep x0 always equal to 0 in a better way.
   cpu.rx[0] = 0x0;
-  inc_cycle(cpu);
+  incrementCycle(cpu);
   return null;
 }
 
@@ -1184,28 +1200,28 @@ pub fn main() !u8 {
     if (try cycle(&cpu)) |ret| {
       switch (ret) {
         ErrCode.UnknownInstruction => |code| {
-          dump_cpu(cpu);
+          debug.dump_cpu(cpu);
           println("error: unknown instruction: 0b{b} (funct3: 0b{b} funct7: 0b{b})", .{
             code.opcode, code.funct3, code.funct7,
           });
           return 1;
         },
         ErrCode.InstructionNotImplemented => |payload| {
-          dump_cpu(cpu);
+          debug.dump_cpu(cpu);
           println("error: instruction not implemented: {s} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
             payload.inst.name, payload.code.opcode, payload.code.funct3, payload.code.funct7,
           });
           return 2;
         },
         ErrCode.InsufficientPrivilegeMode => |payload| {
-          dump_cpu(cpu);
+          debug.dump_cpu(cpu);
           println("error: insufficient privilege level for operation: CPU level {} instruction {s}", .{
             payload.priv_level, payload.inst.name,
           });
           return 3;
         },
         ErrCode.UnhandledTrapVectorMode => |payload| {
-          dump_cpu(cpu);
+          debug.dump_cpu(cpu);
           println("error: Unhandled trap vector mode {any}", .{ payload });
           return 4;
         },
