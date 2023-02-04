@@ -111,7 +111,7 @@ const Instruction = struct {
 // Note that instruction's opcodes are spread around. You have the opcode field
 // (7bits) but some instructions will also have additional bits (funct3 and funct7) to be decoded.
 // see riscv-spec-20191213.pdf chapter 24 RV32/64 Instruction Set Listings
-const instructionSet = [_]Instruction{
+const base_instruction_set = [_]Instruction{
   .{ .name = "LUI",     .opcode = 0b0110111, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.U, .handler = lui },
   .{ .name = "AUIPC",   .opcode = 0b0010111, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.U, .handler = auipc },
   .{ .name = "JAL",     .opcode = 0b1101111, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.J, .handler = jal },
@@ -152,9 +152,15 @@ const instructionSet = [_]Instruction{
   .{ .name = "FENCE",   .opcode = 0b0001111, .funct3 = 0b000, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
   .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = 0b000, .funct7 = null,      .format = InstructionFormat.I, .handler = ecall },
   .{ .name = "MRET",    .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0011000, .format = InstructionFormat.I, .handler = mret },
-  // Zifencei extension
+};
+
+// riscv-spec-20191213.pdf Chapter 3 "Zifencei" Instruction-Fence Fetch
+const zifencei_set = [_]Instruction{
   .{ .name = "FENCE.I", .opcode = 0b0001111, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
-  // Zicsr extension
+};
+
+// riscv-spec-20191213.pdf Chapter 9 "Zicsr" Control and Status Register (CSR) instructions
+const zicsr_set = [_]Instruction{
   .{ .name = "CSRRW",   .opcode = 0b1110011, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrw },
   .{ .name = "CSRRS",   .opcode = 0b1110011, .funct3 = 0b010, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrs },
   .{ .name = "CSRRC",   .opcode = 0b1110011, .funct3 = 0b011, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrc },
@@ -930,48 +936,58 @@ fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   cpu.pc += 4;
 }
 
-// https://github.com/ziglang/zig/blob/6b3f59c3a735ddbda3b3a62a0dfb5d55fa045f57/lib/std/comptime_string_map.zig
-pub fn decode(opcode: u8, funct3: u8, funct7: u8) !Instruction {
-  const precomputed = comptime blk: {
-    @setEvalBranchQuota(2000);
-    var sorted_opcodes = instructionSet;
-    const asc = (struct {
-      fn asc(context: void, a: Instruction, b: Instruction) bool {
-        _ = context;
-        const afunct3 = a.funct3 orelse 0;
-        const bfunct3 = b.funct3 orelse 0;
-        const afunct7 = a.funct7 orelse 0;
-        const bfunct7 = b.funct7 orelse 0;
-        // What a mess...
-        return a.opcode > b.opcode or (a.opcode == b.opcode and (afunct3 == bfunct3 and afunct7 > bfunct7) or afunct3 > bfunct3);
+// This functor will create a function that will sort the instruction set at
+// compile time and unroll a for loop to accelerate the search of instruction.
+pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8, funct3: u8, funct7: u8) GetInstruction!Instruction {
+  const _inner = struct {
+    // https://github.com/ziglang/zig/blob/6b3f59c3a735ddbda3b3a62a0dfb5d55fa045f57/lib/std/comptime_string_map.zig
+    pub fn decode(opcode: u8, funct3: u8, funct7: u8) GetInstruction!Instruction {
+      const precomputed = comptime blk: {
+        // @setEvalBranchQuota(2000);
+        var sorted_opcodes = instruction_set[0..].*;
+        const asc = (struct {
+          fn asc(context: void, a: Instruction, b: Instruction) bool {
+            _ = context;
+            const afunct3 = a.funct3 orelse 0;
+            const bfunct3 = b.funct3 orelse 0;
+            const afunct7 = a.funct7 orelse 0;
+            const bfunct7 = b.funct7 orelse 0;
+            // What a mess...
+            return a.opcode > b.opcode or (a.opcode == b.opcode and (afunct3 == bfunct3 and afunct7 > bfunct7) or afunct3 > bfunct3);
+          }
+        }).asc;
+        std.sort.sort(Instruction, &sorted_opcodes, {}, asc);
+        break :blk .{
+          .max_opcode = sorted_opcodes[0].opcode,
+          .min_opcode = sorted_opcodes[sorted_opcodes.len - 1].opcode,
+          .sorted_opcodes = sorted_opcodes,
+        };
+      };
+      if (opcode < precomputed.min_opcode or opcode > precomputed.max_opcode) {
+        return GetInstruction.UnknownInstruction;
       }
-    }).asc;
-    std.sort.sort(Instruction, &sorted_opcodes, {}, asc);
-    break :blk .{
-      .max_opcode = sorted_opcodes[0].opcode,
-      .min_opcode = sorted_opcodes[sorted_opcodes.len - 1].opcode,
-      .sorted_opcodes = sorted_opcodes,
-    };
-  };
-  if (opcode < precomputed.min_opcode or opcode > precomputed.max_opcode) {
-    return GetInstruction.UnknownInstruction;
-  }
 
-  comptime var i: comptime_int = 0;
-  inline while (true) {
-    if (precomputed.sorted_opcodes[i].opcode == opcode) {
-      if (precomputed.sorted_opcodes[i].funct3 == null or precomputed.sorted_opcodes[i].funct3 == funct3) {
-        if (precomputed.sorted_opcodes[i].funct7 == null or precomputed.sorted_opcodes[i].funct7 == funct7) {
-          return precomputed.sorted_opcodes[i];
+      comptime var i: comptime_int = 0;
+      inline while (true) {
+        if (precomputed.sorted_opcodes[i].opcode == opcode) {
+          if (precomputed.sorted_opcodes[i].funct3 == null or precomputed.sorted_opcodes[i].funct3 == funct3) {
+            if (precomputed.sorted_opcodes[i].funct7 == null or precomputed.sorted_opcodes[i].funct7 == funct7) {
+              return precomputed.sorted_opcodes[i];
+            }
+          }
+        }
+        i += 1;
+        if (i >= precomputed.sorted_opcodes.len) {
+          return GetInstruction.UnknownInstruction;
         }
       }
     }
-    i += 1;
-    if (i >= precomputed.sorted_opcodes.len) {
-      return GetInstruction.UnknownInstruction;
-    }
-  }
+  };
+
+  return _inner.decode;
 }
+
+const decode = makeDecoder(&base_instruction_set ++ zifencei_set ++ zicsr_set);
 
 const Code = struct { opcode: u8, funct3: u8, funct7: u8 };
 
