@@ -1,6 +1,7 @@
 const std = @import("std");
 const csr = @import("csr.zig");
 const mul = @import("mul.zig");
+const atomic = @import("atomic.zig");
 const debug = @import("debug.zig");
 const register_names = debug.register_names;
 const println = debug.println;
@@ -184,6 +185,38 @@ pub fn RiscVCPU(comptime T: type) type {
     mem: []u8,
     priv_level: u7 = @enumToInt(csr.PrivilegeMode.MACHINE),
     csr: [4096]T = [_]u32{ 0 } ** 4096,
+  };
+}
+
+pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
+  if (address < 0x80000000) @breakpoint();
+  switch (T) {
+    u8 => mem[address] = value,
+    u16 => {
+      mem[address] = @intCast(u8, value & 0x000000FF);
+      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+    },
+    u32 => {
+      mem[address] = @intCast(u8, value & 0x000000FF);
+      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+      mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
+      mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+    },
+    else => unreachable,
+  }
+}
+
+pub fn memread(comptime T: type, mem: []u8, address: u32) T {
+  if (address < 0x80000000) @breakpoint();
+  return switch (T) {
+    u8 => mem[address],
+    u16 => (mem[address + 1] << 8) | mem[address],
+    u32 =>
+      @as(u32, mem[address]) |
+      (@as(u32, mem[address + 1]) << 8) |
+      (@as(u32, mem[address + 2]) << 16) |
+      (@as(u32, mem[address + 3]) << 24),
+    else => unreachable,
   };
 }
 
@@ -547,26 +580,6 @@ fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   cpu.rx[params.rd] = @as(u32, cpu.mem[address]) | (@as(u32, cpu.mem[address + 1]) << 8);
   cpu.rx[0] = 0;
   cpu.pc += 4;
-}
-
-fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
-  if (address < 0x80000000) {
-   @breakpoint();
-  }
-  switch (T) {
-    u8 => mem[address] = value,
-    u16 => {
-      mem[address] = @intCast(u8, value & 0x000000FF);
-      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-    },
-    u32 => {
-      mem[address] = @intCast(u8, value & 0x000000FF);
-      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-      mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
-      mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
-    },
-    else => unreachable,
-  }
 }
 
 fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -961,7 +974,7 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
     // https://github.com/ziglang/zig/blob/6b3f59c3a735ddbda3b3a62a0dfb5d55fa045f57/lib/std/comptime_string_map.zig
     pub fn decode(opcode: u8, funct3: u8, funct7: u8) GetInstruction!Instruction {
       const precomputed = comptime blk: {
-        // @setEvalBranchQuota(2000);
+        @setEvalBranchQuota(2000);
         var sorted_opcodes = instruction_set[0..].*;
         const asc = (struct {
           fn asc(context: void, a: Instruction, b: Instruction) bool {
@@ -1005,7 +1018,13 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
   return _inner.decode;
 }
 
-const decode = makeDecoder(&base_instruction_set ++ zifencei_set ++ zicsr_set ++ mul.m_extension_set);
+const decode = makeDecoder(
+  &base_instruction_set
+  ++ zifencei_set
+  ++ zicsr_set
+  ++ mul.m_extension_set
+  ++ atomic.a_extension_set
+);
 
 const Code = struct { opcode: u8, funct3: u8, funct7: u8 };
 
@@ -1086,7 +1105,7 @@ fn illegalInstruction(packets: u32, cpu: *RiscVCPU(u32)) void {
   exception(@enumToInt(csr.MCauseExceptionCode.IllegalInstruction), packets, cpu);
 }
 
-fn instructionAddressMisaligned(badaddress: u32, cpu: *RiscVCPU(u32)) void {
+pub fn instructionAddressMisaligned(badaddress: u32, cpu: *RiscVCPU(u32)) void {
   std.log.debug("Instruction address misaligned @ 0x{x:0>8}", .{ cpu.pc });
   exception(@enumToInt(csr.MCauseExceptionCode.InstructionAddressMisaligned), badaddress, cpu);
 }
@@ -1162,8 +1181,8 @@ fn loadfile(filename: []const u8) ![]align(std.mem.page_size) u8 {
 }
 
 pub const std_options = struct {
-  // pub const log_level = .debug;
-  pub const log_level = .info;
+  pub const log_level = .debug;
+  // pub const log_level = .info;
 };
 
 pub fn main() !u8 {
