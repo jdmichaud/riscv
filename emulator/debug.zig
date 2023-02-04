@@ -24,4 +24,5 @@ pub fn dump_cpu(cpu: RiscVCPU(u32)) void {
   println("pc     = 0x{x:0>8}", .{ cpu.pc });
   println("mstatus= 0x{x:0>8} mtvec  = 0x{x:0>8} mscratch = 0x{x:0>8} mtval = 0x{x:0>8}", .{ cpu.csr[csr.mstatus], cpu.csr[csr.mtvec], cpu.csr[csr.mscratch], cpu.csr[csr.mtval] });
   println("mepc   = 0x{x:0>8} mcause = 0x{x:0>8}      mip = 0x{x:0>8}   mie = 0x{x:0>8}", .{ cpu.csr[csr.mepc], cpu.csr[csr.mcause], cpu.csr[csr.mip], cpu.csr[csr.mie] });
+  println("mcycle = 0x{x:0>8}", .{ cpu.csr[csr.mcycle] });
 }
