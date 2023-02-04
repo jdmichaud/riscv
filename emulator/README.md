@@ -33,6 +33,11 @@ dtc mark1.dts -o mark1.dtb
 ./riscv --dtb mark1.dtb ../buildroot/output/images/Image
 ```
 
+Execute in gdb
+```bash
+gdb -quiet -ex run --args ./riscv --dtb mark1.dtb ../buildroot/output/images/Image
+```
+
 Assemble to RISC-V:
 ```bash
 ../buildroot/output/host/bin/riscv32-buildroot-linux-uclibc-as tests/strlen.S -r strlen.elf
