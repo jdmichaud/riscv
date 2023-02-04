@@ -169,6 +169,18 @@ const zicsr_set = [_]Instruction{
   .{ .name = "CSRRCI",  .opcode = 0b1110011, .funct3 = 0b111, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrci },
 };
 
+// riscv-spec-20191213.pdf Chapter 7 "M" Standard Extension for Integer Multiplication and Division
+const m_extension_set = [_]Instruction{
+  .{ .name = "MUL",     .opcode = 0b0110011, .funct3 = 0b000, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "MULH",    .opcode = 0b0110011, .funct3 = 0b001, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "MULHSU",  .opcode = 0b0110011, .funct3 = 0b010, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "MULHU",   .opcode = 0b0110011, .funct3 = 0b011, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "DIV",     .opcode = 0b0110011, .funct3 = 0b100, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "DIVU",    .opcode = 0b0110011, .funct3 = 0b101, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "REM",     .opcode = 0b0110011, .funct3 = 0b110, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+  .{ .name = "REMU",    .opcode = 0b0110011, .funct3 = 0b111, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
+};
+
 // A RiscVCPU(T) RISC-V processor is a program counter of Tbits width, 32 Tbits
 // registrers (with register 0 always equal 0), the 4K CSR registry file and the
 // associated memory, See riscv-spec-20191213.pdf chapter 2.1 Programer's model
@@ -987,7 +999,7 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
   return _inner.decode;
 }
 
-const decode = makeDecoder(&base_instruction_set ++ zifencei_set ++ zicsr_set);
+const decode = makeDecoder(&base_instruction_set ++ zifencei_set ++ zicsr_set ++ m_extension_set);
 
 const Code = struct { opcode: u8, funct3: u8, funct7: u8 };
 
@@ -1144,8 +1156,8 @@ fn loadfile(filename: []const u8) ![]align(std.mem.page_size) u8 {
 }
 
 pub const std_options = struct {
-  pub const log_level = .debug;
-  // pub const log_level = .info;
+  // pub const log_level = .debug;
+  pub const log_level = .info;
 };
 
 pub fn main() !u8 {
@@ -1170,7 +1182,7 @@ pub fn main() !u8 {
     .mem = (mem.ptr - options.page_offset)[0..options.page_offset + options.mem_size],
     .csr = init_csr(u32, &rv32_initial_csr_values),
   };
-  defer allocator.free(cpu.mem);
+  defer allocator.free(cpu.raw_mem);
 
   // Load the executable (or kernel)
   const executable = loadfile(options.exec_filename) catch |err| {
