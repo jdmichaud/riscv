@@ -549,6 +549,26 @@ fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   cpu.pc += 4;
 }
 
+fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
+  if (address < 0x80000000) {
+   @breakpoint();
+  }
+  switch (T) {
+    u8 => mem[address] = value,
+    u16 => {
+      mem[address] = @intCast(u8, value & 0x000000FF);
+      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+    },
+    u32 => {
+      mem[address] = @intCast(u8, value & 0x000000FF);
+      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+      mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
+      mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+    },
+    else => unreachable,
+  }
+}
+
 fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
@@ -556,7 +576,8 @@ fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
     cpu.pc, params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
-  cpu.mem[cpu.rx[params.rs1] +% offset] = @intCast(u8, cpu.rx[params.rs2] & 0x000000FF);
+  const address = cpu.rx[params.rs1] +% offset;
+  memwrite(u8, cpu.mem, address, @intCast(u8, cpu.rx[params.rs2] & 0x000000FF));
   cpu.pc += 4;
 }
 
@@ -569,8 +590,7 @@ fn sh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
   const value = cpu.rx[params.rs2];
-  cpu.mem[address] = @intCast(u8, value & 0x000000FF);
-  cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+  memwrite(u16, cpu.mem, address, @intCast(u16, value & 0x0000FFFF));
   cpu.pc += 4;
 }
 
@@ -583,10 +603,7 @@ fn sw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
   const value = cpu.rx[params.rs2];
-  cpu.mem[address] = @intCast(u8, value & 0x000000FF);
-  cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-  cpu.mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
-  cpu.mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+  memwrite(u32, cpu.mem, address, value);
   cpu.pc += 4;
 }
 
@@ -1082,9 +1099,9 @@ fn incrementCycle(cpu: *RiscVCPU(u32)) void {
   // TODO: minstret is probably not equal to cycle though.
   cpu.csr[0xB02] = cpu.csr[0xB00];
   cpu.csr[0xB82] = cpu.csr[0xB80];
-  // if (cpu.csr[0xB00] % 1000000 == 0) {
-  //   debug.dump_cpu(cpu.*);
-  // }
+  if (cpu.csr[0xB00] % 1000000 == 0) {
+    debug.dump_cpu(cpu.*);
+  }
 }
 
 pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
