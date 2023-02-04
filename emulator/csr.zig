@@ -53,9 +53,9 @@ const CSRSet = [_]CSR{
   .{ .name = "frm",            .index = 0x002, .flags = URW, .setter = setCSR,      .getter = getCSR, .description = "Floating-Point Dynamic Rounding Mode" },
   .{ .name = "fcsr",           .index = 0x003, .flags = URW, .setter = setCSR,      .getter = getCSR, .description = "Floating-Point Control and Status Register (frm + fflags)" },
 // Unprivileged Counter/Timers
-  .{ .name = "cycle",          .index = 0xC00, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Cycle counter for RDCYCLE instruction" },
-  .{ .name = "time",           .index = 0xC01, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Timer for RDTIME instruction" },
-  .{ .name = "instret",        .index = 0xC02, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Instructions-retired counter for RDINSTRET instruction" },
+  .{ .name = "cycle",          .index = 0xC00, .flags = URO, .setter = setNop,      .getter = getMCycle, .description = "Cycle counter for RDCYCLE instruction" },
+  .{ .name = "time",           .index = 0xC01, .flags = URO, .setter = setNop,      .getter = getTime,.description = "Timer for RDTIME instruction" },
+  .{ .name = "instret",        .index = 0xC02, .flags = URO, .setter = setNop,      .getter = getMInstreth, .description = "Instructions-retired counter for RDINSTRET instruction" },
   .{ .name = "hpmcounter3",    .index = 0xC03, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Performance-monitoring counter" },
   .{ .name = "hpmcounter4",    .index = 0xC04, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Performance-monitoring counter" },
   .{ .name = "hpmcounter5",    .index = 0xC05, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Performance-monitoring counter" },
@@ -85,9 +85,9 @@ const CSRSet = [_]CSR{
   .{ .name = "hpmcounter29",   .index = 0xC1D, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Performance-monitoring counter" },
   .{ .name = "hpmcounter30",   .index = 0xC1E, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Performance-monitoring counter" },
   .{ .name = "hpmcounter31",   .index = 0xC1F, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Performance-monitoring counter" },
-  .{ .name = "cycleh",         .index = 0xC80, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of cycle, RV32 only" },
-  .{ .name = "timeh",          .index = 0xC81, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of time, RV32 only" },
-  .{ .name = "instreth",       .index = 0xC82, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of instret, RV32 only" },
+  .{ .name = "cycleh",         .index = 0xC80, .flags = URO, .setter = setNop,      .getter = getMCycleh, .description = "Upper 32 bits of cycle, RV32 only" },
+  .{ .name = "timeh",          .index = 0xC81, .flags = URO, .setter = setNop,      .getter = getTimeh, .description = "Upper 32 bits of time, RV32 only" },
+  .{ .name = "instreth",       .index = 0xC82, .flags = URO, .setter = setNop,      .getter = getMInstreth, .description = "Upper 32 bits of instret, RV32 only" },
   .{ .name = "hpmcounter3h",   .index = 0xC83, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of hpmcounter3, RV32 only" },
   .{ .name = "hpmcounter4h",   .index = 0xC84, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of hpmcounter4, RV32 only" },
   .{ .name = "hpmcounter5h",   .index = 0xC85, .flags = URO, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of hpmcounter5, RV32 only" },
@@ -216,8 +216,8 @@ const CSRSet = [_]CSR{
   .{ .name = "pmpaddr1",       .index = 0x3B1, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection address register" },
 // TODO: Complete the physical memory protection address registers.
   .{ .name = "pmpaddr63",      .index = 0x3EF, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection address register" },
-  .{ .name = "mcycle",         .index = 0xB00, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine cycle counter" },
-  .{ .name = "minstret",       .index = 0xB02, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine instructions-retired counter" },
+  .{ .name = "mcycle",         .index = 0xB00, .flags = MRW, .setter = setNop,      .getter = getMCycle, .description = "Machine cycle counter" },
+  .{ .name = "minstret",       .index = 0xB02, .flags = MRW, .setter = setNop,      .getter = getMInstret, .description = "Machine instructions-retired counter" },
   .{ .name = "mhpmcounter3",   .index = 0xB03, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
   .{ .name = "mhpmcounter4",   .index = 0xB04, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
   .{ .name = "mhpmcounter5",   .index = 0xB05, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
@@ -247,8 +247,8 @@ const CSRSet = [_]CSR{
   .{ .name = "mhpmcounter29",  .index = 0xB1D, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
   .{ .name = "mhpmcounter30",  .index = 0xB1E, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
   .{ .name = "mhpmcounter31",  .index = 0xB1F, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
-  .{ .name = "mcycleh",        .index = 0xB80, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of mcycle, RV32 only" },
-  .{ .name = "minstreth",      .index = 0xB82, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of minstret, RV32 only" },
+  .{ .name = "mcycleh",        .index = 0xB80, .flags = MRW, .setter = setNop,      .getter = getMCycleh, .description = "Upper 32 bits of mcycle, RV32 only" },
+  .{ .name = "minstreth",      .index = 0xB82, .flags = MRW, .setter = setNop,      .getter = getMInstreth, .description = "Upper 32 bits of minstret, RV32 only" },
   .{ .name = "mhpmcounter3h",  .index = 0xB83, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of mhpmcounter3, RV32 only" },
   .{ .name = "mhpmcounter4h",  .index = 0xB84, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of mhpmcounter4, RV32 only" },
   .{ .name = "mhpmcounter5h",  .index = 0xB85, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Upper 32 bits of mhpmcounter5, RV32 only" },
@@ -663,6 +663,50 @@ fn setMip(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
   cpu.csr[self.index] = value;
   cpu.csr[self.index] = cpu.csr[self.index] & ~MipBits.SSIP & ~MipBits.STIP & ~MipBits.SEIP;
   riscv.checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
+}
+
+fn getMCycle(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  @breakpoint();
+  // Do not use self here, this can be called by other xcycle registers, see
+  // riscv-privileged-20211203.pdf Ch. 3.1.11.
+  return cpu.csr[mcycle];
+}
+
+fn getMCycleh(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  @breakpoint();
+  // Do not use self here, this can be called by other xcycle registers, see
+  // riscv-privileged-20211203.pdf Ch. 3.1.11.
+  return cpu.csr[mcycleh];
+}
+
+fn getMInstret(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  @breakpoint();
+  // Do not use self here, this can be called by other xcycle registers, see
+  // riscv-privileged-20211203.pdf Ch. 3.1.11.
+  return cpu.csr[minstret];
+}
+
+fn getMInstreth(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  @breakpoint();
+  // Do not use self here, this can be called by other xcycle registers, see
+  // riscv-privileged-20211203.pdf Ch. 3.1.11.
+  return cpu.csr[minstreth];
+}
+
+fn getTime(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  _ = cpu;
+  unreachable();
+}
+
+fn getTimeh(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  _ = cpu;
+  unreachable();
 }
 
 // These are the initial values for the CSR registry file.

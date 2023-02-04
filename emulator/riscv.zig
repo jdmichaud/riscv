@@ -31,6 +31,7 @@ const Options = struct {
   mem_size: u32, // -m,--mempory-size
   exec_filename: []const u8,
   dtb_filename: ?[]const u8, // -d,--dtb
+  debug: bool,
 };
 
 fn get_options(args: [][:0]u8) !Options {
@@ -39,6 +40,7 @@ fn get_options(args: [][:0]u8) !Options {
   var mem_size: u32 = DEFAULT_MEM_SIZE;
   var exec_filename: ?[]const u8 = null;
   var dtb_filename: ?[]const u8 = null;
+  var debug_option = false;
   while (i < args.len) {
     if (std.mem.eql(u8, args[i], "-d") or std.mem.eql(u8, args[i], "--dtb")) {
       i += 1;
@@ -58,6 +60,9 @@ fn get_options(args: [][:0]u8) !Options {
       i += 1;
       mem_size = try std.fmt.parseInt(u32, args[i], 10);
       i += 1;
+    } else if (std.mem.eql(u8, args[i], "-e") or std.mem.eql(u8, args[i], "--debug")) {
+      debug_option = true;
+      i += 1;
     } else { exec_filename = args[i]; i += 1; }
   }
   if (exec_filename) |e_filename| {
@@ -66,6 +71,7 @@ fn get_options(args: [][:0]u8) !Options {
       .mem_size = mem_size,
       .exec_filename = e_filename,
       .dtb_filename = dtb_filename,
+      .debug = debug_option,
     };
   }
 
@@ -188,36 +194,52 @@ pub fn RiscVCPU(comptime T: type) type {
   };
 }
 
+const stdout = std.io.getStdOut().writer();
 pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
-  if (address < 0x80000000) @breakpoint();
-  switch (T) {
-    u8 => mem[address] = value,
-    u16 => {
-      mem[address] = @intCast(u8, value & 0x000000FF);
-      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-    },
-    u32 => {
-      mem[address] = @intCast(u8, value & 0x000000FF);
-      mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-      mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
-      mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
-    },
-    else => unreachable,
+  if (address >= 0x80000000) {
+    switch (T) {
+      u8 => mem[address] = value,
+      u16 => {
+        mem[address] = @intCast(u8, value & 0x000000FF);
+        mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+      },
+      u32 => {
+        mem[address] = @intCast(u8, value & 0x000000FF);
+        mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+        mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
+        mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+      },
+      else => unreachable,
+    }
+  } else {
+    if (address == 0x10000000) {
+      @breakpoint();
+      switch (T) {
+        u8 => stdout.print("{c}", .{ value }) catch {},
+        else => unreachable,
+      }
+    }
   }
 }
 
 pub fn memread(comptime T: type, mem: []u8, address: u32) T {
-  if (address < 0x80000000) @breakpoint();
-  return switch (T) {
-    u8 => mem[address],
-    u16 => (mem[address + 1] << 8) | mem[address],
-    u32 =>
-      @as(u32, mem[address]) |
-      (@as(u32, mem[address + 1]) << 8) |
-      (@as(u32, mem[address + 2]) << 16) |
-      (@as(u32, mem[address + 3]) << 24),
-    else => unreachable,
-  };
+  if (address >= 0x80000000) {
+    return switch (T) {
+      u8 => mem[address],
+      u16 => (mem[address + 1] << 8) | mem[address],
+      u32 =>
+        @as(u32, mem[address]) |
+        (@as(u32, mem[address + 1]) << 8) |
+        (@as(u32, mem[address + 2]) << 16) |
+        (@as(u32, mem[address + 3]) << 24),
+      else => unreachable,
+    };
+  } else {
+    if (address == 0x10000000) {
+      // @breakpoint();
+    }
+    return 0;
+  }
 }
 
 // Instructions have format from which will depend how parameters to the
@@ -504,12 +526,12 @@ fn addi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn lb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: lb x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8}) [0x{x:0>8}]", .{
+  std.log.debug("0x{x:0>8}: lb x{}, x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
-    cpu.rx[params.rs1] + params.imm, cpu.mem[cpu.rx[params.rs1] + params.imm],
+    cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
-  cpu.rx[params.rd] = cpu.mem[cpu.rx[params.rs1] +% offset];
+  cpu.rx[params.rd] = memread(u8, cpu.mem, cpu.rx[params.rs1] +% offset);
   if (cpu.rx[params.rd] & 0x00000080 != 0) { // signed?
     // sign extension
     cpu.rx[params.rd] |= 0xFFFFFF80;
@@ -585,8 +607,9 @@ fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
-  std.log.debug("0x{x:0>8}: sb x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
-    cpu.pc, params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
+  std.log.debug("0x{x:0>8}: sb {s}(0x{x:0>8}), {s}(0x{x:0>8}) + 0x{x:0>8} (@0x{x:0>8})", .{
+    cpu.pc, register_names[params.rs2], cpu.rx[params.rs2], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
@@ -1118,7 +1141,7 @@ fn incrementCycle(cpu: *RiscVCPU(u32)) void {
   // TODO: minstret is probably not equal to cycle though.
   cpu.csr[0xB02] = cpu.csr[0xB00];
   cpu.csr[0xB82] = cpu.csr[0xB80];
-  if (cpu.csr[0xB00] % 1000000 == 0) {
+  if (std_options.log_level == .debug and cpu.csr[0xB00] % 1000000 == 0) {
     debug.dump_cpu(cpu.*);
   }
 }
