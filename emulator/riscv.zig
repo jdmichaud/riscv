@@ -1,5 +1,6 @@
 const std = @import("std");
 const csr = @import("csr.zig");
+const mul = @import("mul.zig");
 const debug = @import("debug.zig");
 const register_names = debug.register_names;
 const println = debug.println;
@@ -76,7 +77,7 @@ const GetInstruction = error {
   UnknownInstruction,
 };
 
-const RiscError = error {
+pub const RiscError = error {
   InstructionNotImplemented,
   InsufficientPrivilegeMode,
   UnhandledTrapVectorMode,
@@ -95,7 +96,7 @@ pub const InstructionFormat = enum {
   J,
 };
 
-const Instruction = struct {
+pub const Instruction = struct {
   const Self = @This();
 
   name: []const u8,
@@ -169,18 +170,6 @@ const zicsr_set = [_]Instruction{
   .{ .name = "CSRRCI",  .opcode = 0b1110011, .funct3 = 0b111, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrci },
 };
 
-// riscv-spec-20191213.pdf Chapter 7 "M" Standard Extension for Integer Multiplication and Division
-const m_extension_set = [_]Instruction{
-  .{ .name = "MUL",     .opcode = 0b0110011, .funct3 = 0b000, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "MULH",    .opcode = 0b0110011, .funct3 = 0b001, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "MULHSU",  .opcode = 0b0110011, .funct3 = 0b010, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "MULHU",   .opcode = 0b0110011, .funct3 = 0b011, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "DIV",     .opcode = 0b0110011, .funct3 = 0b100, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "DIVU",    .opcode = 0b0110011, .funct3 = 0b101, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "REM",     .opcode = 0b0110011, .funct3 = 0b110, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-  .{ .name = "REMU",    .opcode = 0b0110011, .funct3 = 0b111, .funct7 = 0b0000001, .format = InstructionFormat.R, .handler = nullHandler },
-};
-
 // A RiscVCPU(T) RISC-V processor is a program counter of Tbits width, 32 Tbits
 // registrers (with register 0 always equal 0), the 4K CSR registry file and the
 // associated memory, See riscv-spec-20191213.pdf chapter 2.1 Programer's model
@@ -201,7 +190,7 @@ pub fn RiscVCPU(comptime T: type) type {
 // Instructions have format from which will depend how parameters to the
 // instructions are fetched.
 // See riscv-spec-20191213.pdf Ch. 2.2 Base Instruction Format.
-fn fetchJ(packets: u32) struct { rd: u5, imm: u32 } {
+pub fn fetchJ(packets: u32) struct { rd: u5, imm: u32 } {
   // 0b00000000 00000000 0000XXXX X0000000
   const rd = (packets & 0x00000F80) >> 7;
   // You will note that we should shift by 12, 21, 10 and 1. But for some
@@ -215,7 +204,7 @@ fn fetchJ(packets: u32) struct { rd: u5, imm: u32 } {
   return .{ .rd = @intCast(u5, rd), .imm = imm };
 }
 
-fn fetchR(packets: u32) struct { rd: u5, rs1: u5, rs2: u5, funct7: u7 } {
+pub fn fetchR(packets: u32) struct { rd: u5, rs1: u5, rs2: u5, funct7: u7 } {
   // 0bFFFFFFF2 22221111 1fffrrrr rooooooo
   const rd = (packets & 0x00000F80) >> 7;
   const rs1 = (packets & 0x000F8000) >> 15;
@@ -229,7 +218,7 @@ fn fetchR(packets: u32) struct { rd: u5, rs1: u5, rs2: u5, funct7: u7 } {
   };
 }
 
-fn fetchI(packets: u32) struct { rd: u5, rs1: u5, imm: u32 } {
+pub fn fetchI(packets: u32) struct { rd: u5, rs1: u5, imm: u32 } {
   // 0biiiiiiii iiii1111 1fffrrrr rooooooo
   const rd = (packets & 0x00000F80) >> 7;
   const rs1 = (packets & 0x000F8000) >> 15;
@@ -237,7 +226,7 @@ fn fetchI(packets: u32) struct { rd: u5, rs1: u5, imm: u32 } {
   return .{ .rd = @intCast(u5, rd), .rs1 = @intCast(u5, rs1), .imm = imm };
 }
 
-fn fetchB(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
+pub fn fetchB(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
   // 0biiiiiii2 22221111 1fffiiii iooooooo
   const rs1 = (packets & 0x000F8000) >> 15;
   const rs2 = (packets & 0x01F00000) >> 20;
@@ -253,7 +242,7 @@ fn fetchB(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
   };
 }
 
-fn fetchS(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
+pub fn fetchS(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
   // 0biiiiiii2 22221111 1fffiiii iooooooo
   const rs1 = (packets & 0x000F8000) >> 15;
   const rs2 = (packets & 0x01F00000) >> 20;
@@ -267,7 +256,7 @@ fn fetchS(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
   };
 }
 
-fn fetchU(packets: u32) struct { rd: u5, imm: u32 } {
+pub fn fetchU(packets: u32) struct { rd: u5, imm: u32 } {
   // 0biiiiiiii iiiiiiii iiiirrrr rooooooo
   const rd = (packets & 0x00000F80) >> 7;
   const imm = (packets & 0xFFFFF000) >> 12;
@@ -286,7 +275,7 @@ fn computeTrapAddress(comptime T: type, cpu: *RiscVCPU(T)) RiscError!T {
   return cpu.csv[0x305];
 }
 
-fn nullHandler(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
+pub fn nullHandler(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = cpu;
   _ = instruction;
   _ = packets;
@@ -999,7 +988,7 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
   return _inner.decode;
 }
 
-const decode = makeDecoder(&base_instruction_set ++ zifencei_set ++ zicsr_set ++ m_extension_set);
+const decode = makeDecoder(&base_instruction_set ++ zifencei_set ++ zicsr_set ++ mul.m_extension_set);
 
 const Code = struct { opcode: u8, funct3: u8, funct7: u8 };
 
