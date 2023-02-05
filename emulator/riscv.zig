@@ -196,6 +196,9 @@ pub fn RiscVCPU(comptime T: type) type {
 
 const stdout = std.io.getStdOut().writer();
 pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
+  if (address > mem.len) {
+    @breakpoint();
+  }
   if (address >= 0x80000000) {
     switch (T) {
       u8 => mem[address] = value,
@@ -212,21 +215,41 @@ pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
       else => unreachable,
     }
   } else {
-    if (address == 0x10000000) {
-      // @breakpoint();
-      switch (T) {
-        u8 => stdout.print("{c}", .{ value }) catch {},
-        else => unreachable,
-      }
+    // if (address > 0x10000000 and address < 0x10000100) {
+    //   std.log.info("=> 0x{x:0>8}", .{ address });
+    // }
+    switch (address) {
+      0x10000000 => {
+        // @breakpoint();
+        switch (T) {
+          u8 => stdout.print("{c}", .{ value }) catch {},
+          else => unreachable,
+        }
+      },
+      0x11004004 | 0x11004000 => {
+        // CLINT ?
+        @breakpoint();
+      },
+      0x11100000 => {
+        // SysCon ?
+        @breakpoint();
+      },
+      else => {},
     }
   }
 }
 
 pub fn memread(comptime T: type, mem: []u8, address: u32) T {
+  if (address > mem.len) {
+    @breakpoint();
+  }
+  if (address == 0) {
+    unreachable;
+  }
   if (address >= 0x80000000) {
     return switch (T) {
       u8 => mem[address],
-      u16 => (mem[address + 1] << 8) | mem[address],
+      u16 => (@as(u16, mem[address + 1]) << 8) | @as(u16, mem[address]),
       u32 =>
         @as(u32, mem[address]) |
         (@as(u32, mem[address + 1]) << 8) |
@@ -235,8 +258,20 @@ pub fn memread(comptime T: type, mem: []u8, address: u32) T {
       else => unreachable,
     };
   } else {
-    if (address == 0x10000000) {
-      // @breakpoint();
+    // if (address > 0x10000000 and address < 0x10000100) {
+    //   std.log.info("<= 0x{x:0>8}", .{ address });
+    // }
+    switch (address) {
+      0x10000005 => {
+        return 0x60;
+      },
+      0x1100bffc | 0x1100bff8 => {
+        // timer?
+        @breakpoint();
+      },
+      else => {
+        std.log.info("read @0x{x:0>8}", .{ address });
+      },
     }
     return 0;
   }
@@ -550,7 +585,7 @@ fn lh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = @as(u32, cpu.mem[address]) | (@as(u32, cpu.mem[address + 1]) << 8);
+  cpu.rx[params.rd] = memread(u16, cpu.mem, address);
   if (cpu.rx[params.rd] & 0x00008000 != 0) { // signed?
     // sign extension
     cpu.rx[params.rd] |= 0xFFFF8000;
@@ -568,11 +603,7 @@ fn lw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = @as(u32, cpu.mem[address]) |
-    (@as(u32, cpu.mem[address + 1]) << 8) |
-    (@as(u32, cpu.mem[address + 2]) << 16) |
-    (@as(u32, cpu.mem[address + 3]) << 24)
-  ;
+  cpu.rx[params.rd] = memread(u32, cpu.mem, address);
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -586,7 +617,7 @@ fn lbu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = cpu.mem[address];
+  cpu.rx[params.rd] = memread(u8, cpu.mem, address);
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -600,7 +631,7 @@ fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = @as(u32, cpu.mem[address]) | (@as(u32, cpu.mem[address + 1]) << 8);
+  cpu.rx[params.rd] = memread(u16, cpu.mem, address);
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -1216,9 +1247,7 @@ pub fn main() !u8 {
   const args: [][:0]u8 = try std.process.argsAlloc(allocator);
   defer std.process.argsFree(allocator, args);
 
-  var options = get_options(args) catch {
-    return 1;
-  };
+  var options = try get_options(args);
 
   // Create the CPU.
   var mem = try allocator.alloc(u8, options.mem_size); // might change if a DTB is loaded.
