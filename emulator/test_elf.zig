@@ -137,6 +137,6 @@ pub fn main() !void {
         break;
       }
     }
-    println("{} PASS / {} FAILS / {} TOTAL", .{ passes, fails, fails + passes });
   }
+  println("pass: {} fails: {} total: {}", .{ passes, fails, fails + passes });
 }

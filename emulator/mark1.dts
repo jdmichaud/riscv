@@ -95,7 +95,7 @@
 
 		clint@11000000 {
 		  // INTC_1 is the handle of the interrupt controller. This interrupt
-		  // controller has am #interrupt-cells of 1 so the interrupt is specified
+		  // controller has an #interrupt-cells of 1 so the interrupt is specified
 		  // by a single 32bits number. 0x03 for the first one. Then another
 		  // interrupt, still directed to itnerrupt controller with handle INTC_1 is
 		  // defined as 0x07. So: 0x03 -> INTC_1 and 0x07 -> INTC_1.

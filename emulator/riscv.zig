@@ -28,7 +28,7 @@ const DEFAULT_MEM_SIZE = 0x4000000; // 64 MB
 
 const Options = struct {
   page_offset: u32, // -p,--page-offset
-  mem_size: u32, // -m,--mempory-size
+  mem_size: u32, // -m,--memory-size
   exec_filename: []const u8,
   dtb_filename: ?[]const u8, // -d,--dtb
   debug: bool,
@@ -213,7 +213,7 @@ pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
     }
   } else {
     if (address == 0x10000000) {
-      @breakpoint();
+      // @breakpoint();
       switch (T) {
         u8 => stdout.print("{c}", .{ value }) catch {},
         else => unreachable,
@@ -419,8 +419,9 @@ fn beq(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn bne(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchB(packets);
-  std.log.debug("0x{x:0>8}: bne x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8} ({})", .{
-    cpu.pc, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2], params.imm, params.imm,
+  std.log.debug("0x{x:0>8}: bne {s}(0x{x:0>8}), {s}(0x{x:0>8}), 0x{x:0>8} ({})", .{
+    cpu.pc, register_names[params.rs1], cpu.rx[params.rs1], register_names[params.rs2],
+    cpu.rx[params.rs2], params.imm, params.imm,
   });
   if (cpu.rx[params.rs1] != cpu.rx[params.rs2]) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
@@ -1204,8 +1205,8 @@ fn loadfile(filename: []const u8) ![]align(std.mem.page_size) u8 {
 }
 
 pub const std_options = struct {
-  pub const log_level = .debug;
-  // pub const log_level = .info;
+  // pub const log_level = .debug;
+  pub const log_level = .info;
 };
 
 pub fn main() !u8 {

@@ -47,3 +47,8 @@ Tests failure modes:
 ```bash
 zig build-exe -freference-trace test_elf.zig && ./test_elf $(find tests/riscv-tests/isa/ -executable -type f -name 'rv32m*-p-*')
 ```
+
+Run tests for integer, atomics, multiplications and failure mode:
+```bash
+zig build-exe -freference-trace test_elf.zig && ./test_elf $(find tests/riscv-tests/isa/ -executable -type f -name 'rv32[u|m][m|i|a]*-p-*')
+```
