@@ -17,8 +17,8 @@
 		// 0x80000000 is CONFIG_PAGE_OFFSET. Below this value live the memory mapped
 		// devices. Above is the actual memory.
 		// 0x80000000 == 2147483648 == 2G
-		// 0x4000000 == 16777216 == 64M ??
-		reg = <0x00 0x80000000 0x00 0x4000000>;
+		// 0x04000000 == 16777216 == 64M ??
+		reg = <0x00 0x80000000 0x00 0x04000000>;
 	};
 
 	cpus {
@@ -97,7 +97,7 @@
 		  // INTC_1 is the handle of the interrupt controller. This interrupt
 		  // controller has an #interrupt-cells of 1 so the interrupt is specified
 		  // by a single 32bits number. 0x03 for the first one. Then another
-		  // interrupt, still directed to itnerrupt controller with handle INTC_1 is
+		  // interrupt, still directed to interrupt controller with handle INTC_1 is
 		  // defined as 0x07. So: 0x03 -> INTC_1 and 0x07 -> INTC_1.
 			interrupts-extended = <&INTC_1 0x03 &INTC_1 0x07>;
 			reg = <0x00 0x11000000 0x00 0x10000>;

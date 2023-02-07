@@ -78,9 +78,9 @@ fn lrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     reservation_set = true;
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -97,7 +97,7 @@ fn swc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
     if (reservation_set) {
-      memwrite(u32, cpu.mem, address, cpu.rx[params.rs2]);
+      memwrite(u32, cpu, address, cpu.rx[params.rs2]);
       cpu.rx[params.rd] = 0;
       reservation_set = false;
     } else {
@@ -119,9 +119,9 @@ fn amoswapw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErr
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
+    cpu.rx[params.rd] = memread(u32, cpu, address);
+    memwrite(u32, cpu, address, cpu.rx[params.rs2]);
     cpu.rx[0] = 0;
-    memwrite(u32, cpu.mem, address, cpu.rx[params.rs2]);
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -137,11 +137,11 @@ fn amoaddw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const signed_rd = @bitCast(i32, cpu.rx[params.rd]);
     const signed_rs2 = @bitCast(i32, cpu.rx[params.rs2]);
-    memwrite(u32, cpu.mem, address, @bitCast(u32, signed_rd +% signed_rs2));
+    memwrite(u32, cpu, address, @bitCast(u32, signed_rd +% signed_rs2));
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -157,10 +157,10 @@ fn amoxorw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = cpu.rx[params.rd] ^ cpu.rx[params.rs2];
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -176,10 +176,10 @@ fn amoandw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = cpu.rx[params.rd] & cpu.rx[params.rs2];
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -195,10 +195,10 @@ fn amoorw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = cpu.rx[params.rd] | cpu.rx[params.rs2];
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -214,13 +214,13 @@ fn amominw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = @bitCast(u32, std.math.min(
       @bitCast(i32, cpu.rx[params.rd]),
       @bitCast(i32, cpu.rx[params.rs2])
     ));
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -236,13 +236,13 @@ fn amomaxw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = @bitCast(u32, std.math.max(
       @bitCast(i32, cpu.rx[params.rd]),
       @bitCast(i32, cpu.rx[params.rs2])
     ));
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -258,10 +258,10 @@ fn amominuw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErr
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = std.math.min(cpu.rx[params.rd], cpu.rx[params.rs2]);
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);
@@ -277,10 +277,10 @@ fn amomaxuw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErr
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    cpu.rx[params.rd] = memread(u32, cpu.mem, address);
-    cpu.rx[0] = 0;
+    cpu.rx[params.rd] = memread(u32, cpu, address);
     const result = std.math.max(cpu.rx[params.rd], cpu.rx[params.rs2]);
-    memwrite(u32, cpu.mem, address, result);
+    memwrite(u32, cpu, address, result);
+    cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
     instructionAddressMisaligned(address, cpu);

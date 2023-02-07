@@ -1,5 +1,6 @@
 const std = @import("std");
 const csr = @import("csr.zig");
+const clock = @import("clock.zig");
 const mul = @import("mul.zig");
 const atomic = @import("atomic.zig");
 const debug = @import("debug.zig");
@@ -158,7 +159,7 @@ const base_instruction_set = [_]Instruction{
   .{ .name = "OR",      .opcode = 0b0110011, .funct3 = 0b110, .funct7 = 0b0000000, .format = InstructionFormat.R, .handler = or_ },
   .{ .name = "AND",     .opcode = 0b0110011, .funct3 = 0b111, .funct7 = 0b0000000, .format = InstructionFormat.R, .handler = and_ },
   .{ .name = "FENCE",   .opcode = 0b0001111, .funct3 = 0b000, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
-  .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = 0b000, .funct7 = null,      .format = InstructionFormat.I, .handler = ecall },
+  .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0000000,      .format = InstructionFormat.I, .handler = ecall },
   .{ .name = "MRET",    .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0011000, .format = InstructionFormat.I, .handler = mret },
 };
 
@@ -186,50 +187,44 @@ pub fn RiscVCPU(comptime T: type) type {
     const _t = T;
 
     pc: T = 0,
-    rx: [32]T = [_]u32{ 0 } ** 32,
+    rx: [32]T = [_]T{ 0 } ** 32,
     raw_mem: []u8,
     mem: []u8,
     priv_level: u7 = @enumToInt(csr.PrivilegeMode.MACHINE),
-    csr: [4096]T = [_]u32{ 0 } ** 4096,
+    csr: [4096]T = [_]T{ 0 } ** 4096,
+    clock: clock.Clock = .{ .mtimecmp = 0xFFFFFFFFFFFFFFFF }, // TODO: ideally, the clock should be external to the CPU
   };
 }
 
 const stdout = std.io.getStdOut().writer();
-pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
-  if (address > mem.len) {
+pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) void {
+  if (address > cpu.mem.len) {
     @breakpoint();
-  }
-  if (address >= 0x80000000) {
+  } else if (address >= 0x80000000) {
     switch (T) {
-      u8 => mem[address] = value,
+      u8 => cpu.mem[address] = value,
       u16 => {
-        mem[address] = @intCast(u8, value & 0x000000FF);
-        mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+        cpu.mem[address] = @intCast(u8, value & 0x000000FF);
+        cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
       },
       u32 => {
-        mem[address] = @intCast(u8, value & 0x000000FF);
-        mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-        mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
-        mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+        cpu.mem[address] = @intCast(u8, value & 0x000000FF);
+        cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+        cpu.mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
+        cpu.mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
       },
       else => unreachable,
     }
   } else {
-    // if (address > 0x10000000 and address < 0x10000100) {
-    //   std.log.info("=> 0x{x:0>8}", .{ address });
-    // }
     switch (address) {
       0x10000000 => {
-        // @breakpoint();
         switch (T) {
           u8 => stdout.print("{c}", .{ value }) catch {},
           else => unreachable,
         }
       },
-      0x11004004 | 0x11004000 => {
-        // CLINT ?
-        @breakpoint();
-      },
+      0x11004000 => cpu.clock.setMTimeCmpL(value),
+      0x11004004 => cpu.clock.setMTimeCmpH(value),
       0x11100000 => {
         // SysCon ?
         @breakpoint();
@@ -239,42 +234,35 @@ pub fn memwrite(comptime T: type, mem: []u8, address: u32, value: T) void {
   }
 }
 
-pub fn memread(comptime T: type, mem: []u8, address: u32) T {
-  if (address > mem.len) {
+pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
+  if (address > cpu.mem.len) {
     @breakpoint();
-  }
-  if (address == 0) {
-    unreachable;
-  }
-  if (address >= 0x80000000) {
+  } else if (address == 0) {
+    std.os.exit(1);
+  } else if (address >= 0x80000000) {
     return switch (T) {
-      u8 => mem[address],
-      u16 => (@as(u16, mem[address + 1]) << 8) | @as(u16, mem[address]),
+      u8 => cpu.mem[address],
+      u16 => (@as(u16, cpu.mem[address + 1]) << 8) | @as(u16, cpu.mem[address]),
       u32 =>
-        @as(u32, mem[address]) |
-        (@as(u32, mem[address + 1]) << 8) |
-        (@as(u32, mem[address + 2]) << 16) |
-        (@as(u32, mem[address + 3]) << 24),
+        @as(u32, cpu.mem[address]) |
+        (@as(u32, cpu.mem[address + 1]) << 8) |
+        (@as(u32, cpu.mem[address + 2]) << 16) |
+        (@as(u32, cpu.mem[address + 3]) << 24),
       else => unreachable,
     };
   } else {
-    // if (address > 0x10000000 and address < 0x10000100) {
-    //   std.log.info("<= 0x{x:0>8}", .{ address });
-    // }
     switch (address) {
       0x10000005 => {
         return 0x60;
       },
-      0x1100bffc | 0x1100bff8 => {
-        // timer?
-        @breakpoint();
-      },
-      else => {
-        std.log.info("read @0x{x:0>8}", .{ address });
-      },
+      // TODO: This could potentially be dangerous if the higher order bits change
+      // after we query the lower order bits.
+      0x1100BFF8 => return @intCast(T, cpu.clock.getTime() & 0x00000000FFFFFFFF),
+      0x1100BFFC => return @intCast(T, (cpu.clock.getTime() & 0xFFFFFFFF00000000) >> 32),
+      else => {},
     }
-    return 0;
   }
+  return 0;
 }
 
 // Instructions have format from which will depend how parameters to the
@@ -381,7 +369,9 @@ fn noop(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn lui(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchU(packets);
-  std.log.debug("0x{x:0>8}: lui x{}, imm (0x{x:0>8})", .{ cpu.pc, params.rd, params.imm });
+  std.log.debug("0x{x:0>8}: lui {s}, imm (0x{x:0>8})", .{
+    cpu.pc, register_names[params.rd], params.imm,
+  });
   cpu.rx[params.rd] = (params.imm << 12) & 0xFFFFF000;
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -417,8 +407,9 @@ fn jal(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn jalr(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: jalr x{}(0x{x:0>8}), x{}(0x{x:0>8}), 0x{x:0>8}", .{
-    cpu.pc, params.rd, cpu.rx[params.rd], params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: jalr {s}(0x{x:0>8}), {s}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, register_names[params.rd], cpu.rx[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm,
   });
   const pc = cpu.pc;
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
@@ -567,7 +558,7 @@ fn lb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
     cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
-  cpu.rx[params.rd] = memread(u8, cpu.mem, cpu.rx[params.rs1] +% offset);
+  cpu.rx[params.rd] = memread(u8, cpu, cpu.rx[params.rs1] +% offset);
   if (cpu.rx[params.rd] & 0x00000080 != 0) { // signed?
     // sign extension
     cpu.rx[params.rd] |= 0xFFFFFF80;
@@ -585,7 +576,7 @@ fn lh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = memread(u16, cpu.mem, address);
+  cpu.rx[params.rd] = memread(u16, cpu, address);
   if (cpu.rx[params.rd] & 0x00008000 != 0) { // signed?
     // sign extension
     cpu.rx[params.rd] |= 0xFFFF8000;
@@ -603,7 +594,7 @@ fn lw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = memread(u32, cpu.mem, address);
+  cpu.rx[params.rd] = memread(u32, cpu, address);
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -617,7 +608,7 @@ fn lbu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = memread(u8, cpu.mem, address);
+  cpu.rx[params.rd] = memread(u8, cpu, address);
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -631,7 +622,7 @@ fn lhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  cpu.rx[params.rd] = memread(u16, cpu.mem, address);
+  cpu.rx[params.rd] = memread(u16, cpu, address);
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -645,7 +636,7 @@ fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  memwrite(u8, cpu.mem, address, @intCast(u8, cpu.rx[params.rs2] & 0x000000FF));
+  memwrite(u8, cpu, address, @intCast(u8, cpu.rx[params.rs2] & 0x000000FF));
   cpu.pc += 4;
 }
 
@@ -658,20 +649,21 @@ fn sh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
   const value = cpu.rx[params.rs2];
-  memwrite(u16, cpu.mem, address, @intCast(u16, value & 0x0000FFFF));
+  memwrite(u16, cpu, address, @intCast(u16, value & 0x0000FFFF));
   cpu.pc += 4;
 }
 
 fn sw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchS(packets);
-  std.log.debug("0x{x:0>8}: sw x{}(0x{x:0>8}), x{}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
-    cpu.pc, params.rs2, cpu.rx[params.rs2], params.rs1, cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
+  std.log.debug("0x{x:0>8}: sw {s}(0x{x:0>8}), {s}(0x{x:0>8} + 0x{x:0>8} = 0x{x:0>8})", .{
+    cpu.pc, register_names[params.rs2], cpu.rx[params.rs2], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm, cpu.rx[params.rs1] + params.imm,
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
   const value = cpu.rx[params.rs2];
-  memwrite(u32, cpu.mem, address, value);
+  memwrite(u32, cpu, address, value);
   cpu.pc += 4;
 }
 
@@ -738,8 +730,9 @@ fn andi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn slli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: slli x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
+  std.log.debug("0x{x:0>8}: slli {s}, {s}(0x{x:0>8}), 0x{x:0>8}", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm,
   });
   const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
   cpu.rx[params.rd] = cpu.rx[params.rs1] << imm;
@@ -775,8 +768,9 @@ fn srai(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn add(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("0x{x:0>8}: add x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: add {s}, {s}(0x{x:0>8}), {s}(0x{x:0>8})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], register_names[params.rs2], cpu.rx[params.rs2],
   });
   cpu.rx[params.rd] = cpu.rx[params.rs1] +% cpu.rx[params.rs2];
   cpu.rx[0] = 0;
@@ -797,8 +791,9 @@ fn sub(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
 fn sll(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("0x{x:0>8}: sll x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
+  std.log.debug("0x{x:0>8}: sll {s}, {s}(0x{x:0>8}), x{}(0x{x:0>8})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
   const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
   cpu.rx[params.rd] = cpu.rx[params.rs1] << shift;
@@ -892,7 +887,7 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   const params = fetchI(packets);
   if (params.imm == 1) {
     // EBREAK
-    return RiscError.InstructionNotImplemented;
+    @breakpoint();
   }
   std.log.debug("0x{x:0>8}: ecall", .{ cpu.pc });
   exception(@enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall), 0, cpu);
@@ -1111,13 +1106,14 @@ pub fn checkForInterrupt(cpu: *RiscVCPU(u32)) void {
       // Fetch the pending interrupt
       const mie = csr.csrRegistry[csr.mie].get(cpu.*);
       // Priority order: MEI, MSI, MTI, SEI, SSI, STI according to riscv-privileged-20211203.pdf Ch. 3.1.9
-      if ((mip & mie & 11) != 0) { // External (hardware) interrupt
+      if ((mip & mie & (1 << 11)) != 0) { // External (hardware) interrupt
+        // 0x80000000 mark the exception as being an interruption.
         interrupt(@enumToInt(csr.MCauseInterruptCode.MachineExternalInterrupt) & 0x80000000, 0, cpu);
       }
-      if ((mip & mie &  3) != 0) { // Software interrupt
+      if ((mip & mie & (1 <<  3)) != 0) { // Software interrupt
         interrupt(@enumToInt(csr.MCauseInterruptCode.MachineSoftwareInterrupt) & 0x80000000, 0, cpu);
       }
-      if ((mip & mie &  7) != 0) { // Timer interrupt
+      if ((mip & mie & (1 <<  7)) != 0) { // Timer interrupt
         interrupt(@enumToInt(csr.MCauseInterruptCode.MachineTimerInterrupt) & 0x80000000, 0, cpu);
       }
 
@@ -1136,16 +1132,16 @@ fn interrupt(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
 fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
   // From https://mullerlee.cyou/2020/07/09/riscv-exception-interrupt/
   // update mcause with is_interupt and exception_code
-  csr.csrRegistry[csr.mcause].set(cpu, cause);
+  cpu.csr[csr.mcause] = cause;
   // update mtval with exception-specific information
   // according to riscv-privileged-20211203.pdf Ch. 3.1.16, mtval contains information on error 0 otherwise.
-  csr.csrRegistry[csr.mtval].set(cpu, mtval);
+  cpu.csr[csr.mtval] = mtval;
   // update mstatus with current mode (also riscv-privileged-20211203.pdf Ch. 3.1.6.1 Privileged and Global Interrupt-enable Stack in mstatus)
-  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) | (@intCast(u32, cpu.priv_level) << 11));
+  cpu.csr[csr.mstatus] = csr.csrRegistry[csr.mstatus].get(cpu.*) | (@intCast(u32, cpu.priv_level) << 11);
   // update mstatus to disable interrupt
-  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) & 0xFFFFFFF7);
+  cpu.csr[csr.mstatus] = csr.csrRegistry[csr.mstatus].get(cpu.*) & 0xFFFFFFF7;
   // update mepc with current instruction address (also riscv-privileged-20211203.pdf Ch. 3.3.1 Environment Call and Breakpoint)
-  csr.csrRegistry[csr.mepc].set(cpu, cpu.pc);
+  cpu.csr[csr.mepc] = cpu.pc;
   // Guessed from https://jborza.com/emulation/2021/04/22/ecalls-and-syscalls.html. Where is this documented?
   cpu.pc = csr.csrRegistry[csr.mtvec].get(cpu.*);
 }
@@ -1182,6 +1178,14 @@ pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
   // If we do not handle compressed instruction, all instructions address must be aligned
   if (cpu.pc % @sizeOf(u32) != 0) {
     instructionAddressMisaligned(cpu.pc, cpu);
+  }
+  // Check for timer interrupt
+  // riscv-privileged-20211203.pdf Ch. 3.2.1
+  if (cpu.clock.getTime() >= cpu.clock.getMTimeCmp()) {
+    // riscv-privileged-20211203.pdf Ch. 3.1.9
+    // set the MTIP (Machine Timer Interrupt Pending) flag.
+    // A set to mip will trigger a checkForInterrupt.
+    csr.csrRegistry[csr.mip].set(cpu, csr.csrRegistry[csr.mip].get(cpu.*) | (1 <<  7));
   }
   var packets: u32 = cpu.mem[cpu.pc] |
     @as(u32, cpu.mem[cpu.pc + 1]) << 8 |

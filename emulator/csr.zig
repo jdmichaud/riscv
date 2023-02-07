@@ -175,7 +175,7 @@ const CSRSet = [_]CSR{
   .{ .name = "mconfigptr",     .index = 0xF15, .flags = MRO, .setter = setCSR,      .getter = getCSR, .description = "Pointer to configuration data structure" },
 // Machine Trap Setup
   .{ .name = "mstatus",        .index = 0x300, .flags = MRW, .setter = setMStatus,  .getter = getCSR, .description = "Machine status register" },
-  .{ .name = "misa",           .index = 0x301, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "ISA and extension" },
+  .{ .name = "misa",           .index = 0x301, .flags = MRW, .setter = setNop,      .getter = getMisa,.description = "ISA and extension" },
   .{ .name = "medeleg",        .index = 0x302, .flags = MRW, .setter = setCSR,      .getter = getNop, .description = "Machine exception delegation register" },
   .{ .name = "mideleg",        .index = 0x303, .flags = MRW, .setter = setMideleg,  .getter = getNop, .description = "Machine interrupt delegation register" },
   .{ .name = "mie",            .index = 0x304, .flags = MRW, .setter = setMie,      .getter = getCSR, .description = "Machine interrupt-enable register" },
@@ -196,26 +196,26 @@ const CSRSet = [_]CSR{
   .{ .name = "mseccfg",        .index = 0x747, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine security configuration register" },
   .{ .name = "mseccfgh",       .index = 0x757, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Additional machine security conf. register, RV32 only" },
 // Machine Memory Protection
-  .{ .name = "pmpcfg0",        .index = 0x3A0, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration" },
-  .{ .name = "pmpcfg1",        .index = 0x3A1, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg2",        .index = 0x3A2, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration" },
-  .{ .name = "pmpcfg3",        .index = 0x3A3, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg4",        .index = 0x3A4, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg5",        .index = 0x3A5, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg6",        .index = 0x3A6, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg7",        .index = 0x3A7, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg8",        .index = 0x3A8, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg9",        .index = 0x3A9, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg10",       .index = 0x3AA, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg11",       .index = 0x3AB, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg12",       .index = 0x3AC, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg13",       .index = 0x3AD, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpcfg14",       .index = 0x3AE, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration" },
-  .{ .name = "pmpcfg15",       .index = 0x3AF, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
-  .{ .name = "pmpaddr0",       .index = 0x3B0, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection address register" },
-  .{ .name = "pmpaddr1",       .index = 0x3B1, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection address register" },
+  .{ .name = "pmpcfg0",        .index = 0x3A0, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration" },
+  .{ .name = "pmpcfg1",        .index = 0x3A1, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg2",        .index = 0x3A2, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration" },
+  .{ .name = "pmpcfg3",        .index = 0x3A3, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg4",        .index = 0x3A4, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg5",        .index = 0x3A5, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg6",        .index = 0x3A6, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg7",        .index = 0x3A7, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg8",        .index = 0x3A8, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg9",        .index = 0x3A9, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg10",       .index = 0x3AA, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg11",       .index = 0x3AB, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg12",       .index = 0x3AC, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg13",       .index = 0x3AD, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpcfg14",       .index = 0x3AE, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration" },
+  .{ .name = "pmpcfg15",       .index = 0x3AF, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection configuration, RV32 only" },
+  .{ .name = "pmpaddr0",       .index = 0x3B0, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection address register" },
+  .{ .name = "pmpaddr1",       .index = 0x3B1, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection address register" },
 // TODO: Complete the physical memory protection address registers.
-  .{ .name = "pmpaddr63",      .index = 0x3EF, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Physical memory protection address register" },
+  .{ .name = "pmpaddr63",      .index = 0x3EF, .flags = MRW, .setter = setNop,      .getter = getCSR, .description = "Physical memory protection address register" },
   .{ .name = "mcycle",         .index = 0xB00, .flags = MRW, .setter = setNop,      .getter = getMCycle, .description = "Machine cycle counter" },
   .{ .name = "minstret",       .index = 0xB02, .flags = MRW, .setter = setNop,      .getter = getMInstret, .description = "Machine instructions-retired counter" },
   .{ .name = "mhpmcounter3",   .index = 0xB03, .flags = MRW, .setter = setCSR,      .getter = getCSR, .description = "Machine performance-monitoring counter" },
@@ -626,6 +626,13 @@ fn setMStatus(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
   cpu.csr[self.index] = cpu.csr[self.index] & ~MstatusBits.TVM & ~MstatusBits.MPRV &
     ~MstatusBits.SUM & ~MstatusBits.MXR & ~MstatusBits.FS & ~MstatusBits.VS &
     ~MstatusBits.XS & ~MstatusBits.SD; // Force those flags to 0.
+
+  // TODO: Documentation indicates that some field of the mstatus CSR must be
+  // preserved, but mini-riscv32 force the value to 0. Probably wrong but while
+  // investigating panic issue, let's reduce differences with a working
+  // implementation.
+  // cpu.csr[self.index] = value;
+
   riscv.checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
 }
 
@@ -667,7 +674,7 @@ fn setMip(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
 
 fn getMCycle(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
   _ = self;
-  @breakpoint();
+  // @breakpoint();
   // Do not use self here, this can be called by other xcycle registers, see
   // riscv-privileged-20211203.pdf Ch. 3.1.11.
   return cpu.csr[mcycle];
@@ -675,7 +682,7 @@ fn getMCycle(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
 
 fn getMCycleh(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
   _ = self;
-  @breakpoint();
+  // @breakpoint();
   // Do not use self here, this can be called by other xcycle registers, see
   // riscv-privileged-20211203.pdf Ch. 3.1.11.
   return cpu.csr[mcycleh];
@@ -683,7 +690,7 @@ fn getMCycleh(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
 
 fn getMInstret(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
   _ = self;
-  @breakpoint();
+  // @breakpoint();
   // Do not use self here, this can be called by other xcycle registers, see
   // riscv-privileged-20211203.pdf Ch. 3.1.11.
   return cpu.csr[minstret];
@@ -691,7 +698,7 @@ fn getMInstret(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
 
 fn getMInstreth(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
   _ = self;
-  @breakpoint();
+  // @breakpoint();
   // Do not use self here, this can be called by other xcycle registers, see
   // riscv-privileged-20211203.pdf Ch. 3.1.11.
   return cpu.csr[minstreth];
@@ -700,21 +707,30 @@ fn getMInstreth(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
 fn getTime(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
   _ = self;
   _ = cpu;
-  unreachable();
+  // @breakpoint();
+  return 0;
 }
 
 fn getTimeh(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
   _ = self;
   _ = cpu;
-  unreachable();
+  // @breakpoint();
+  return 0;
+}
+
+fn getMisa(self: CSR, cpu: riscv.RiscVCPU(u32)) u32 {
+  _ = self;
+  // @breakpoint();
+  return cpu.csr[misa];
 }
 
 // These are the initial values for the CSR registry file.
 // All the other CSRs must be set to 0.
 pub const rv32_initial_csr_values = [_]std.meta.Tuple(&.{ usize, u32 }) {
   .{ 0xF14, 0x00000000 }, // // riscv-privileged-20211203.pdf Ch. 3.1.5 Hart ID Register (mhardid)
-  // This is set to 32 bits with I extension.
-  .{ 0x301, 0x40000100 }, // riscv-privileged-20211203.pdf Ch. 3.1.1 Machine ISA Register (misa)
+  // This is set to 32 bits with I, A and M extension.
+  .{ 0x301, 0x40401101 }, // riscv-privileged-20211203.pdf Ch. 3.1.1 Machine ISA Register (misa)
+// 0x40001101
   // MIE (Machine Interrupt Enabled) and MPIE (Machine Previous Interrupt Enabled) are set to true.
   // MPP (Machine Previous Privilege) is set to 11 for Machine mode.
   .{ 0x300, 0x00001888 }, // riscv-privileged-20211203.pdf Ch. 3.1.6 Machine Status Register (mstatus)
