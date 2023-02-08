@@ -200,6 +200,7 @@ const stdout = std.io.getStdOut().writer();
 pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) void {
   if (address > cpu.mem.len) {
     @breakpoint();
+    exception(@enumToInt(csr.MCauseExceptionCode.StoreAccessFault), cpu.pc, cpu);
   } else if (address >= 0x80000000) {
     switch (T) {
       u8 => cpu.mem[address] = value,
@@ -236,6 +237,7 @@ pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) v
 
 pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
   if (address > cpu.mem.len) {
+    exception(@enumToInt(csr.MCauseExceptionCode.LoadAccessFault), cpu.pc, cpu);
     @breakpoint();
   } else if (address == 0) {
     std.os.exit(1);
@@ -885,12 +887,13 @@ fn and_(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
 fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  if (params.imm == 1) {
-    // EBREAK
-    @breakpoint();
+  if (params.imm == 1) { // EBREAK
+    // @breakpoint();
+    exception(@enumToInt(csr.MCauseExceptionCode.Breakpoint), cpu.pc, cpu);
+  } else { // ECALL
+    std.log.debug("0x{x:0>8}: ecall", .{ cpu.pc });
+    exception(@enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall), 0, cpu);
   }
-  std.log.debug("0x{x:0>8}: ecall", .{ cpu.pc });
-  exception(@enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall), 0, cpu);
 }
 
 fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -920,11 +923,13 @@ fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   }
   const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
+  cpu.rx[0] = 0;
+  // setting a CSR can raise an exception so the pc register must point correctly
+  // before setting the CSR.
+  cpu.pc += 4;
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) | initial_value);
   }
-  cpu.rx[0] = 0;
-  cpu.pc += 4;
 }
 
 fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -938,11 +943,11 @@ fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   }
   const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) & (~initial_value));
   }
-  cpu.rx[0] = 0;
-  cpu.pc += 4;
 }
 
 fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -956,11 +961,11 @@ fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   }
   const initial_value = cpu.rx[params.rs1];
   cpu.rx[params.rd] = cpu.csr[params.imm];
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, initial_value);
   }
-  cpu.rx[0] = 0;
-  cpu.pc += 4;
 }
 
 fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -974,11 +979,11 @@ fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   }
   const initial_value = params.rs1;
   cpu.rx[params.rd] = csr.csrRegistry[params.imm].get(cpu.*);
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, initial_value);
   }
-  cpu.rx[0] = 0;
-  cpu.pc += 4;
 }
 
 fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -992,11 +997,11 @@ fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   }
   const initial_value = params.rs1;
   cpu.rx[params.rd] = cpu.csr[params.imm];
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) | initial_value);
   }
-  cpu.rx[0] = 0;
-  cpu.pc += 4;
 }
 
 fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
@@ -1010,11 +1015,11 @@ fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   }
   const initial_value = params.rs1;
   cpu.rx[params.rd] = cpu.csr[params.imm];
+  cpu.rx[0] = 0;
+  cpu.pc += 4;
   if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) & (~initial_value));
   }
-  cpu.rx[0] = 0;
-  cpu.pc += 4;
 }
 
 // This functor will create a function that will sort the instruction set at
@@ -1108,13 +1113,13 @@ pub fn checkForInterrupt(cpu: *RiscVCPU(u32)) void {
       // Priority order: MEI, MSI, MTI, SEI, SSI, STI according to riscv-privileged-20211203.pdf Ch. 3.1.9
       if ((mip & mie & (1 << 11)) != 0) { // External (hardware) interrupt
         // 0x80000000 mark the exception as being an interruption.
-        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineExternalInterrupt) & 0x80000000, 0, cpu);
+        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineExternalInterrupt) | 0x80000000, 0, cpu);
       }
       if ((mip & mie & (1 <<  3)) != 0) { // Software interrupt
-        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineSoftwareInterrupt) & 0x80000000, 0, cpu);
+        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineSoftwareInterrupt) | 0x80000000, 0, cpu);
       }
       if ((mip & mie & (1 <<  7)) != 0) { // Timer interrupt
-        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineTimerInterrupt) & 0x80000000, 0, cpu);
+        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineTimerInterrupt) | 0x80000000, 0, cpu);
       }
 
       // const SSIP = mip &  1;

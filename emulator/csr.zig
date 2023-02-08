@@ -757,5 +757,8 @@ pub const MCauseInterruptCode = enum(u32) {
 pub const MCauseExceptionCode = enum(u32) {
   InstructionAddressMisaligned = 0x00000000,
   IllegalInstruction = 0x00000002,
+  Breakpoint = 0x00000003,
+  LoadAccessFault = 0x00000005,
+  StoreAccessFault = 0x00000007,
   MachineModeEnvCall = 0x0000000B,
 };
