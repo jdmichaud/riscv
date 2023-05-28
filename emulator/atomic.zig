@@ -23,10 +23,10 @@ pub const a_extension_set = [_]Instruction{
   .{ .name = "LR.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001001, .format = InstructionFormat.R, .handler = lrw },
   .{ .name = "LR.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001010, .format = InstructionFormat.R, .handler = lrw },
   .{ .name = "LR.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001011, .format = InstructionFormat.R, .handler = lrw },
-  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001100, .format = InstructionFormat.R, .handler = swc },
-  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001101, .format = InstructionFormat.R, .handler = swc },
-  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001110, .format = InstructionFormat.R, .handler = swc },
-  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001111, .format = InstructionFormat.R, .handler = swc },
+  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001100, .format = InstructionFormat.R, .handler = scw },
+  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001101, .format = InstructionFormat.R, .handler = scw },
+  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001110, .format = InstructionFormat.R, .handler = scw },
+  .{ .name = "SC.W",      .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0001111, .format = InstructionFormat.R, .handler = scw },
   .{ .name = "AMOSWAP.W", .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0000100, .format = InstructionFormat.R, .handler = amoswapw },
   .{ .name = "AMOSWAP.W", .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0000101, .format = InstructionFormat.R, .handler = amoswapw },
   .{ .name = "AMOSWAP.W", .opcode = 0b0101111, .funct3 = 0b010, .funct7 = 0b0000110, .format = InstructionFormat.R, .handler = amoswapw },
@@ -68,11 +68,12 @@ pub const a_extension_set = [_]Instruction{
 // riscv-spec-20191213.pdf Chapter 8.2 Load-Reserved/Store-Conditional Instructions
 // TODO: Not sure if we doing the right thing here
 var reservation_set: bool = false;
+var lrw_address: u32 = 0;
 
 fn lrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("0x{x:0>8}: lrw {s}, {s}(0x{x:0>8}), {s}(0x{x:0>8})", .{
+  std.log.debug("0x{x:0>8}: lr.w {s}, {s}(0x{x:0>8}), {s}(0x{x:0>8})", .{
     cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1],
     register_names[params.rs2], cpu.rx[params.rs2],
   });
@@ -80,6 +81,7 @@ fn lrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   if (address % @sizeOf(u32) == 0) {
     cpu.rx[params.rd] = memread(u32, cpu, address);
     reservation_set = true;
+    lrw_address = address;
     cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
@@ -87,19 +89,18 @@ fn lrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   }
 }
 
-fn swc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
+fn scw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchR(packets);
-  std.log.debug("0x{x:0>8}: swc {s}, {s}(0x{x:0>8}), {s}(0x{x:0>8})", .{
+  std.log.debug("0x{x:0>8}: sc.w {s}, {s}(0x{x:0>8}), {s}(0x{x:0>8})", .{
     cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1],
     register_names[params.rs2], cpu.rx[params.rs2],
   });
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
-    if (reservation_set) {
+    if (reservation_set and lrw_address == address) {
       memwrite(u32, cpu, address, cpu.rx[params.rs2]);
       cpu.rx[params.rd] = 0;
-      reservation_set = false;
     } else {
       cpu.rx[params.rd] = 1; // Non zero value
     }
@@ -108,6 +109,8 @@ fn swc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   } else {
     instructionAddressMisaligned(address, cpu);
   }
+  reservation_set = false;
+  lrw_address = 0;
 }
 
 fn amoswapw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {

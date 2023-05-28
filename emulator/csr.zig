@@ -613,6 +613,7 @@ pub const MstatusBits = struct {
   pub const SUM: u32 = 1 << 18; // riscv-privileged-20211203.pdf Ch. 3.1.6.3
   pub const MXR: u32 = 1 << 19; // riscv-privileged-20211203.pdf Ch. 3.1.6.3
   pub const TVM: u32 = 1 << 20; // riscv-privileged-20211203.pdf Ch. 3.1.6.5
+  pub const TW: u32  = 1 << 21; // riscv-privileged-20211203.pdf Ch. 3.1.6.5
   pub const FS: u32  = 3 << 13; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
   pub const VS: u32  = 3 <<  9; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
   pub const XS: u32  = 3 << 15; // riscv-privileged-20211203.pdf Ch. 3.1.6.6
@@ -621,11 +622,11 @@ pub const MstatusBits = struct {
 // From here some specific CSR getter and setter
 fn setMStatus(self: CSR, cpu: *riscv.RiscVCPU(u32), value: u32) void {
   std.log.debug("set mstatus from 0x{x:0>8} to 0x{x:0>8} MIE {s}", .{
-    cpu.csr[self.index], value, if (cpu.csr[self.index] & MstatusBits.MIE != 0) "enabled" else "disabled" });
+    cpu.csr[self.index], value, if ((value & MstatusBits.MIE) != 0) "enabled" else "disabled" });
   cpu.csr[self.index] = value | 0x00001800; // Force MBB to Machine Mode (0b11) for now.
-  cpu.csr[self.index] = cpu.csr[self.index] & ~MstatusBits.TVM & ~MstatusBits.MPRV &
-    ~MstatusBits.SUM & ~MstatusBits.MXR & ~MstatusBits.FS & ~MstatusBits.VS &
-    ~MstatusBits.XS & ~MstatusBits.SD; // Force those flags to 0.
+  cpu.csr[self.index] = cpu.csr[self.index] & ~MstatusBits.TVM & ~MstatusBits.TW &
+    ~MstatusBits.MPRV & ~MstatusBits.SUM & ~MstatusBits.MXR & ~MstatusBits.FS &
+    ~MstatusBits.VS & ~MstatusBits.XS & ~MstatusBits.SD; // Force those flags to 0.
 
   // TODO: Documentation indicates that some field of the mstatus CSR must be
   // preserved, but mini-riscv32 force the value to 0. Probably wrong but while
@@ -756,9 +757,9 @@ pub const MCauseInterruptCode = enum(u32) {
 
 pub const MCauseExceptionCode = enum(u32) {
   InstructionAddressMisaligned = 0x00000000,
-  IllegalInstruction = 0x00000002,
-  Breakpoint = 0x00000003,
-  LoadAccessFault = 0x00000005,
-  StoreAccessFault = 0x00000007,
-  MachineModeEnvCall = 0x0000000B,
+  IllegalInstruction = 2,
+  Breakpoint = 3,
+  LoadAccessFault = 5,
+  StoreAccessFault = 7,
+  MachineModeEnvCall = 11,
 };
