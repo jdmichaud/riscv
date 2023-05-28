@@ -1,5 +1,7 @@
 const std = @import("std");
 const riscv = @import("riscv.zig");
+const mul = @import("mul.zig");
+const atomic = @import("atomic.zig");
 
 const StatementType = enum {
   csr_value,
@@ -51,7 +53,7 @@ fn assertEqual(rhs: anytype, lhs: anytype, msg: []const u8) !void {
 fn unzip(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
   var in_stream = std.io.fixedBufferStream(data);
 
-  var gzip_stream = try std.compress.gzip.gzipStream(allocator, in_stream.reader());
+  var gzip_stream = try std.compress.gzip.decompress(allocator, in_stream.reader());
   defer gzip_stream.deinit();
 
   // Read and decompress the whole file
@@ -88,9 +90,7 @@ fn load_fixture(allocator: std.mem.Allocator, filename: []const u8)
   // var content = buffer;
   // Parse it
   println("parsing {s}.json.gz...", .{ filename });
-  var stream = std.json.TokenStream.init(content);
-  const parsed_data = try std.json.parse([]TestCase, &stream, .{
-    .allocator = allocator,
+  const parsed_data = try std.json.parseFromSlice([]TestCase, allocator, content, .{
     .ignore_unknown_fields = true,
   });
   var skip_list = std.AutoHashMap(usize, bool).init(allocator);
@@ -141,14 +141,22 @@ pub fn main() !u8 {
     .csr = riscv.init_csr(u32, &riscv.rv32_initial_csr_values),
   };
 
+  const decode = riscv.makeDecoder(
+    &riscv.base_instruction_set
+    ++ riscv.zifencei_set
+    ++ riscv.zicsr_set
+    ++ mul.m_extension_set
+    ++ atomic.a_extension_set
+  );
+
   for (args[1..]) |fixture_file| {
     // Open the file
     // const test_filename = "tests/toto.json";
     const fixture = try load_fixture(allocator, fixture_file);
-    defer std.json.parseFree([]TestCase, fixture.parsed_data, .{ .allocator = allocator });
+    defer std.json.parseFree([]TestCase, allocator, fixture.parsed_data);
 
     // Go through the test cases
-    mainloop: for (fixture.parsed_data) |testCase, i| {
+    mainloop: for (fixture.parsed_data, 0..) |testCase, i| {
       print("{} {s}", .{ i, testCase.text_encoding });
       if (fixture.skip_list.get(i) != null) {
         println(" skipped (skip list)", .{});
@@ -199,7 +207,7 @@ pub fn main() !u8 {
       // Execute the instruction
       const packets = try std.fmt.parseInt(u32, testCase.binary_encoding, 0);
       const code = riscv.fetch(packets);
-      const inst = try riscv.decode(code.opcode, code.funct3, code.funct7);
+      const inst = try decode(code.opcode, code.funct3, code.funct7);
       try inst.handler(inst, &cpu, packets);
       // Check the expectation
       for (testCase.asserts) |assert| {

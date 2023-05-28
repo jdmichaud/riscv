@@ -89,7 +89,7 @@ pub fn main() !void {
       .mem = (mem.ptr - offset)[0..offset + mem.len],
       .csr = riscv.init_csr(u32, &riscv.rv32_initial_csr_values),
     };
-    std.mem.set(u8, cpu.raw_mem, 0);
+    @memset(cpu.raw_mem, 0);
 
     print("executing {s}...", .{ fixture_file });
     try load_elf(allocator, fixture_file, cpu.mem);

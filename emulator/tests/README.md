@@ -24,7 +24,7 @@ tests will then fail but this does not necessarily indicate a bug.
 
 Here is the command to execute all the testable instructions:
 ```bash
-zig build-exe -freference-trace test.zig && \
+zig build-exe -freference-trace test_json.zig && \
   ./test tests/json/jal tests/json/jalr tests/json/add tests/json/addi \
   tests/json/beq tests/json/lb tests/json/sb tests/json/lui tests/json/bne \
   tests/json/bltu tests/json/bgeu tests/json/lh tests/json/lw tests/json/lbu \
