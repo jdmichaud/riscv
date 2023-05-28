@@ -120,7 +120,7 @@ pub const Instruction = struct {
 // Note that instruction's opcodes are spread around. You have the opcode field
 // (7bits) but some instructions will also have additional bits (funct3 and funct7) to be decoded.
 // see riscv-spec-20191213.pdf chapter 24 RV32/64 Instruction Set Listings
-const base_instruction_set = [_]Instruction{
+pub const base_instruction_set = [_]Instruction{
   .{ .name = "LUI",     .opcode = 0b0110111, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.U, .handler = lui },
   .{ .name = "AUIPC",   .opcode = 0b0010111, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.U, .handler = auipc },
   .{ .name = "JAL",     .opcode = 0b1101111, .funct3 = null,  .funct7 = null,      .format = InstructionFormat.J, .handler = jal },
@@ -159,17 +159,18 @@ const base_instruction_set = [_]Instruction{
   .{ .name = "OR",      .opcode = 0b0110011, .funct3 = 0b110, .funct7 = 0b0000000, .format = InstructionFormat.R, .handler = or_ },
   .{ .name = "AND",     .opcode = 0b0110011, .funct3 = 0b111, .funct7 = 0b0000000, .format = InstructionFormat.R, .handler = and_ },
   .{ .name = "FENCE",   .opcode = 0b0001111, .funct3 = 0b000, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
-  .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0000000,      .format = InstructionFormat.I, .handler = ecall },
+  .{ .name = "ECALL",   .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0000000, .format = InstructionFormat.I, .handler = ecall },
+  .{ .name = "WFI",     .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0001000, .format = InstructionFormat.I, .handler = noop },
   .{ .name = "MRET",    .opcode = 0b1110011, .funct3 = 0b000, .funct7 = 0b0011000, .format = InstructionFormat.I, .handler = mret },
 };
 
 // riscv-spec-20191213.pdf Chapter 3 "Zifencei" Instruction-Fence Fetch
-const zifencei_set = [_]Instruction{
+pub const zifencei_set = [_]Instruction{
   .{ .name = "FENCE.I", .opcode = 0b0001111, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = noop },
 };
 
 // riscv-spec-20191213.pdf Chapter 9 "Zicsr" Control and Status Register (CSR) instructions
-const zicsr_set = [_]Instruction{
+pub const zicsr_set = [_]Instruction{
   .{ .name = "CSRRW",   .opcode = 0b1110011, .funct3 = 0b001, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrw },
   .{ .name = "CSRRS",   .opcode = 0b1110011, .funct3 = 0b010, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrs },
   .{ .name = "CSRRC",   .opcode = 0b1110011, .funct3 = 0b011, .funct7 = null,      .format = InstructionFormat.I, .handler = csrrc },
@@ -205,29 +206,53 @@ pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) v
     switch (T) {
       u8 => cpu.mem[address] = value,
       u16 => {
-        cpu.mem[address] = @intCast(u8, value & 0x000000FF);
-        cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
+        cpu.mem[address] = @intCast(u8, value & 0x00FF);
+        cpu.mem[address + 1] = @intCast(u8, (value & 0xFF00) >> 8);
+        // TODO: Faster but ugly?
+        // var toto: *u16 = @ptrCast(*u16, @alignCast(2, &cpu.mem[address]));
+        // toto.* = value;
       },
       u32 => {
         cpu.mem[address] = @intCast(u8, value & 0x000000FF);
         cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
         cpu.mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
         cpu.mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+        // TODO: Faster but ugly?
+        // var toto: *u32 = @ptrCast(*u32, @alignCast(4, &cpu.mem[address]));
+        // toto.* = value;
       },
       else => unreachable,
     }
   } else {
     switch (address) {
+      // UART
       0x10000000 => {
         switch (T) {
           u8 => stdout.print("{c}", .{ value }) catch {},
           else => unreachable,
         }
       },
-      0x11004000 => cpu.clock.setMTimeCmpL(value),
-      0x11004004 => cpu.clock.setMTimeCmpH(value),
+      // CLINT
+      // You can find more about these addresses in linux sources at driver/clocksource/timer-clint.c
+      // but the clint driver deals with this possibility.
+      0x11004000 => {
+        cpu.clock.setMTimeCmpL(value);
+        if (cpu.clock.getTime() < cpu.clock.getMTimeCmp()) {
+          // Where is it specified that the MIP interrupt is automatically cleared?
+          // Found this here: https://forums.sifive.com/t/how-to-clear-interrupt-in-interrupt-handler/2781
+          csr.csrRegistry[csr.mip].set(cpu, csr.csrRegistry[csr.mip].get(cpu.*) & ~@as(u32, (1 <<  7)));
+        }
+      },
+      0x11004004 => {
+        cpu.clock.setMTimeCmpH(value);
+        if (cpu.clock.getTime() < cpu.clock.getMTimeCmp()) {
+          // Where is it specified that the MIP interrupt is automatically cleared?
+          // Found this here: https://forums.sifive.com/t/how-to-clear-interrupt-in-interrupt-handler/2781
+          csr.csrRegistry[csr.mip].set(cpu, csr.csrRegistry[csr.mip].get(cpu.*) & ~@as(u32, (1 <<  7)));
+        }
+      },
+      // SYSCON
       0x11100000 => {
-        // SysCon ?
         @breakpoint();
       },
       else => {},
@@ -238,11 +263,11 @@ pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) v
 pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
   if (address > cpu.mem.len) {
     exception(@enumToInt(csr.MCauseExceptionCode.LoadAccessFault), cpu.pc, cpu);
-    @breakpoint();
+    // @breakpoint();
   } else if (address == 0) {
     std.os.exit(1);
   } else if (address >= 0x80000000) {
-    return switch (T) {
+    const value = switch (T) {
       u8 => cpu.mem[address],
       u16 => (@as(u16, cpu.mem[address + 1]) << 8) | @as(u16, cpu.mem[address]),
       u32 =>
@@ -252,13 +277,16 @@ pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
         (@as(u32, cpu.mem[address + 3]) << 24),
       else => unreachable,
     };
+    return value;
   } else {
     switch (address) {
+      0x10000000 => @breakpoint(), // TODO: read the keyboard and return the typed character
       0x10000005 => {
         return 0x60;
       },
-      // TODO: This could potentially be dangerous if the higher order bits change
-      // after we query the lower order bits.
+      // You can find more about these addresses in linux sources at driver/clocksource/timer-clint.c
+      // The higher order bits could change after we query the lower order bits,
+      // but the clint driver deals with this possibility.
       0x1100BFF8 => return @intCast(T, cpu.clock.getTime() & 0x00000000FFFFFFFF),
       0x1100BFFC => return @intCast(T, (cpu.clock.getTime() & 0xFFFFFFFF00000000) >> 32),
       else => {},
@@ -899,24 +927,32 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   _ = packets;
-  std.log.debug("0x{x:0>8}: mret mpec = 0x{x:0>8}", .{ cpu.pc, cpu.csr[0x341] });
+  std.log.debug("0x{x:0>8}: mret mpec = 0x{x:0>8} mtime 0x{x:0>8} mtimecmp 0x{x:0>8}", .{
+    cpu.pc, cpu.csr[csr.mepc], cpu.clock.getTime(), cpu.clock.getMTimeCmp(),
+  });
+  const mstatus = cpu.csr[csr.mstatus];
   // riscv-privileged-20211203.pdf Ch. 3.1.6 Machine Status Register (mstatus)
   // Set privilege mode to Machine Previous Privilege (MPP) mode as set in the mstatus register.
-  cpu.priv_level = @intCast(u3, (csr.csrRegistry[csr.mstatus].get(cpu.*) & 0x00001800) >> 11);
+  // cpu.priv_level = @intCast(u3, (mstatus & 0x00001800) >> 11);
   cpu.priv_level = 0x3; // Force Machine mode which is the only mode implemented right now.
+  // Set Machine Interrupt Enabled to Machine Previous Interrupt Enabled.
+  // cpu.csr[csr.mstatus] |= (mstatus & 0x00000080) >> 4;
   // Set Machine Previous Interrupt Enabled (MPIE) to 1.
-  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) | 0x00000080);
+  // cpu.csr[csr.mstatus] |= 0x00000080;
   // Set Machine Previous Privilege (MPP) to least privilege mode (now Machine).
-  csr.csrRegistry[csr.mstatus].set(cpu, csr.csrRegistry[csr.mstatus].get(cpu.*) | 0x00001800);
-  cpu.pc = cpu.csr[0x341]; // mepc csr
-  checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
+  // cpu.csr[csr.mstatus] |= 0x00001800;
+  // Set PC to Machine Exception Program Counter.
+  cpu.pc = cpu.csr[csr.mepc];
+  // checkForInterrupt(cpu); // riscv-privileged-20211203.pdf Ch. 3.1.9
+  csr.csrRegistry[csr.mstatus].set(cpu, mstatus | 0x00001880 | (mstatus & 0x00000080) >> 4);
 }
 
 fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrs {s}, {s}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1],
+    params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
@@ -935,8 +971,9 @@ fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrc {s}, {s}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
@@ -953,8 +990,9 @@ fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: csrrw x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrw {s}, {s}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
@@ -971,8 +1009,9 @@ fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
 fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: csrrwi x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrwi {s}, {s}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
@@ -989,8 +1028,9 @@ fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
 fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrsi {s}, 0x{x:0>8}, 0x{x:0>8} ({s})", .{
+    cpu.pc, register_names[params.rd], params.rs1, params.imm,
+    csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
@@ -1007,8 +1047,9 @@ fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
 fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!void {
   _ = instruction;
   const params = fetchI(packets);
-  std.log.debug("0x{x:0>8}: csrrs x{}, x{}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
-    cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
+  std.log.debug("0x{x:0>8}: csrrci {s}, {s}(0x{x:0>8}), 0x{x:0>8} ({s})", .{
+    cpu.pc, register_names[params.rd], register_names[params.rs1],
+    cpu.rx[params.rs1], params.imm, csr.csrRegistry[params.imm].name,
   });
   if (cpu.priv_level < (csr.csrRegistry[params.imm].flags & csr.ModeMask)) {
     return RiscError.InsufficientPrivilegeMode;
@@ -1042,7 +1083,7 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
             return a.opcode > b.opcode or (a.opcode == b.opcode and (afunct3 == bfunct3 and afunct7 > bfunct7) or afunct3 > bfunct3);
           }
         }).asc;
-        std.sort.sort(Instruction, &sorted_opcodes, {}, asc);
+        std.mem.sort(Instruction, &sorted_opcodes, {}, asc);
         break :blk .{
           .max_opcode = sorted_opcodes[0].opcode,
           .min_opcode = sorted_opcodes[sorted_opcodes.len - 1].opcode,
@@ -1114,14 +1155,11 @@ pub fn checkForInterrupt(cpu: *RiscVCPU(u32)) void {
       if ((mip & mie & (1 << 11)) != 0) { // External (hardware) interrupt
         // 0x80000000 mark the exception as being an interruption.
         interrupt(@enumToInt(csr.MCauseInterruptCode.MachineExternalInterrupt) | 0x80000000, 0, cpu);
-      }
-      if ((mip & mie & (1 <<  3)) != 0) { // Software interrupt
+      } else if ((mip & mie & (1 <<  3)) != 0) { // Software interrupt
         interrupt(@enumToInt(csr.MCauseInterruptCode.MachineSoftwareInterrupt) | 0x80000000, 0, cpu);
-      }
-      if ((mip & mie & (1 <<  7)) != 0) { // Timer interrupt
+      } else if ((mip & mie & (1 <<  7)) != 0) { // Timer interrupt
         interrupt(@enumToInt(csr.MCauseInterruptCode.MachineTimerInterrupt) | 0x80000000, 0, cpu);
       }
-
       // const SSIP = mip &  1;
       // const STIP = (mip &  5) and (mie &  5);
       // const SEIP = (mip &  9) and (mie &  9);
@@ -1142,9 +1180,11 @@ fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
   // according to riscv-privileged-20211203.pdf Ch. 3.1.16, mtval contains information on error 0 otherwise.
   cpu.csr[csr.mtval] = mtval;
   // update mstatus with current mode (also riscv-privileged-20211203.pdf Ch. 3.1.6.1 Privileged and Global Interrupt-enable Stack in mstatus)
-  cpu.csr[csr.mstatus] = csr.csrRegistry[csr.mstatus].get(cpu.*) | (@intCast(u32, cpu.priv_level) << 11);
+  cpu.csr[csr.mstatus] = cpu.csr[csr.mstatus] | (@intCast(u32, cpu.priv_level) << 11);
+  // Set Machine Previous Interrupt Enabled to Machine Interrupt Enabled
+  cpu.csr[csr.mstatus] |= (cpu.csr[csr.mstatus] & 0x00000008) << 4;
   // update mstatus to disable interrupt
-  cpu.csr[csr.mstatus] = csr.csrRegistry[csr.mstatus].get(cpu.*) & 0xFFFFFFF7;
+  cpu.csr[csr.mstatus] = cpu.csr[csr.mstatus] & 0xFFFFFFF7;
   // update mepc with current instruction address (also riscv-privileged-20211203.pdf Ch. 3.3.1 Environment Call and Breakpoint)
   cpu.csr[csr.mepc] = cpu.pc;
   // Guessed from https://jborza.com/emulation/2021/04/22/ecalls-and-syscalls.html. Where is this documented?
@@ -1174,9 +1214,6 @@ fn incrementCycle(cpu: *RiscVCPU(u32)) void {
   // TODO: minstret is probably not equal to cycle though.
   cpu.csr[0xB02] = cpu.csr[0xB00];
   cpu.csr[0xB82] = cpu.csr[0xB80];
-  if (std_options.log_level == .debug and cpu.csr[0xB00] % 1000000 == 0) {
-    debug.dump_cpu(cpu.*);
-  }
 }
 
 pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
@@ -1188,15 +1225,10 @@ pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
   // riscv-privileged-20211203.pdf Ch. 3.2.1
   if (cpu.clock.getTime() >= cpu.clock.getMTimeCmp()) {
     // riscv-privileged-20211203.pdf Ch. 3.1.9
-    // set the MTIP (Machine Timer Interrupt Pending) flag.
-    // A set to mip will trigger a checkForInterrupt.
+    // set the MTIP (Machine Timer Interrupt Pending) flag, which will trigger the interrupt.
     csr.csrRegistry[csr.mip].set(cpu, csr.csrRegistry[csr.mip].get(cpu.*) | (1 <<  7));
   }
-  var packets: u32 = cpu.mem[cpu.pc] |
-    @as(u32, cpu.mem[cpu.pc + 1]) << 8 |
-    @as(u32, cpu.mem[cpu.pc + 2]) << 16 |
-    @as(u32, cpu.mem[cpu.pc + 3]) << 24;
-
+  var packets: u32 = memread(u32, cpu, cpu.pc);
   const code = fetch(packets);
   const inst = decode(code.opcode, code.funct3, code.funct7) catch |err| {
     _ = switch (err) {
@@ -1270,6 +1302,8 @@ pub fn main() !u8 {
     .csr = init_csr(u32, &rv32_initial_csr_values),
   };
   defer allocator.free(cpu.raw_mem);
+  // TODO: TMP For compat with mini-rv32ima project
+  std.mem.set(u8, cpu.raw_mem, 0);
 
   // Load the executable (or kernel)
   const executable = loadfile(options.exec_filename) catch |err| {
@@ -1295,6 +1329,8 @@ pub fn main() !u8 {
     allocator.free(cpu.raw_mem);
     cpu.raw_mem = try allocator.alloc(u8, options.mem_size);
     cpu.mem = (cpu.raw_mem.ptr - options.page_offset)[0..options.page_offset + options.mem_size];
+    // TODO: TMP For compat with mini-rv32ima project
+    std.mem.set(u8, cpu.raw_mem, 0);
     // Load the DTB at the end of the memory to ensure that the kernel never
     // write to the it (basically making it readonly).
     dtb_addr = @intCast(u32, cpu.mem.len - dtb.len);
