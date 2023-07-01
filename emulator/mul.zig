@@ -42,11 +42,11 @@ fn mulh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
     cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1],
     register_names[params.rs2], cpu.rx[params.rs2],
   });
-  const result: u64 = @bitCast(u64,
-    @intCast(i64, @bitCast(i32, cpu.rx[params.rs1])) *%
-    @intCast(i64, @bitCast(i32, cpu.rx[params.rs2]))
-  );
-  cpu.rx[params.rd] = @intCast(u32, (result & 0xFFFFFFFF00000000) >> 32);
+  const result: u64 = @as(u64, @bitCast(
+    @as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs1])))) *%
+    @as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs2]))))
+  ));
+  cpu.rx[params.rd] = @as(u32, @intCast((result & 0xFFFFFFFF00000000) >> 32));
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -58,10 +58,10 @@ fn mulhsu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
     cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1],
     register_names[params.rs2], cpu.rx[params.rs2],
   });
-  const rs1signed: u64 = @bitCast(u64, @intCast(i64, @bitCast(i32, cpu.rx[params.rs1])));
-  const rs2unsigned: u64 = @intCast(u64, @bitCast(u32, cpu.rx[params.rs2]));
+  const rs1signed: u64 = @as(u64, @bitCast(@as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs1]))))));
+  const rs2unsigned: u64 = @as(u64, @intCast(@as(u32, @bitCast(cpu.rx[params.rs2]))));
   const result: u64 = rs1signed *% rs2unsigned;
-  cpu.rx[params.rd] = @intCast(u32, (result & 0xFFFFFFFF00000000) >> 32);
+  cpu.rx[params.rd] = @as(u32, @intCast((result & 0xFFFFFFFF00000000) >> 32));
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -73,8 +73,8 @@ fn mulhu(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
     cpu.pc, register_names[params.rd], register_names[params.rs1], cpu.rx[params.rs1],
     register_names[params.rs2], cpu.rx[params.rs2],
   });
-  const result: u64 = @intCast(u64, cpu.rx[params.rs1]) *% @intCast(u64, cpu.rx[params.rs2]);
-  cpu.rx[params.rd] = @intCast(u32, result >> 32);
+  const result: u64 = @as(u64, @intCast(cpu.rx[params.rs1])) *% @as(u64, @intCast(cpu.rx[params.rs2]));
+  cpu.rx[params.rd] = @as(u32, @intCast(result >> 32));
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -88,10 +88,10 @@ fn div(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   if (cpu.rx[params.rs2] != 0) {
     const res: i64 = @divTrunc(
-      @intCast(i64, @bitCast(i32, cpu.rx[params.rs1])),
-      @intCast(i64, @bitCast(i32, cpu.rx[params.rs2]))
+      @as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs1])))),
+      @as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs2]))))
     );
-    cpu.rx[params.rd] = @intCast(u32, res & 0x00000000FFFFFFFF);
+    cpu.rx[params.rd] = @as(u32, @intCast(res & 0x00000000FFFFFFFF));
   } else {
     cpu.rx[params.rd] = 0xFFFFFFFF;
   }
@@ -124,10 +124,10 @@ fn rem(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   });
   if (cpu.rx[params.rs2] != 0) {
     const res: i64 = @rem(
-      @intCast(i64, @bitCast(i32, cpu.rx[params.rs1])),
-      @intCast(i64, @bitCast(i32, cpu.rx[params.rs2]))
+      @as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs1])))),
+      @as(i64, @intCast(@as(i32, @bitCast(cpu.rx[params.rs2]))))
     );
-    cpu.rx[params.rd] = @intCast(u32, res & 0x00000000FFFFFFFF);
+    cpu.rx[params.rd] = @as(u32, @intCast(res & 0x00000000FFFFFFFF));
   } else {
     cpu.rx[params.rd] = cpu.rx[params.rs1];
   }

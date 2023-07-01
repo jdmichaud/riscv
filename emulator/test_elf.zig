@@ -21,7 +21,7 @@ fn load_elf(allocator: std.mem.Allocator, filename: []const u8, mem: []u8) !void
 
   const shstrtab_shdr = (try section_headers.next()).?;
 
-  const shstrtab = try allocator.alloc(u8, @intCast(usize, shstrtab_shdr.sh_size));
+  const shstrtab = try allocator.alloc(u8, @as(usize, @intCast(shstrtab_shdr.sh_size)));
   errdefer allocator.free(shstrtab);
 
   const num_read = try elf_file.preadAll(shstrtab, shstrtab_shdr.sh_offset);

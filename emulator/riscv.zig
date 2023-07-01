@@ -191,7 +191,7 @@ pub fn RiscVCPU(comptime T: type) type {
     rx: [32]T = [_]T{ 0 } ** 32,
     raw_mem: []u8,
     mem: []u8,
-    priv_level: u7 = @enumToInt(csr.PrivilegeMode.MACHINE),
+    priv_level: u7 = @intFromEnum(csr.PrivilegeMode.MACHINE),
     csr: [4096]T = [_]T{ 0 } ** 4096,
     clock: clock.Clock = .{ .mtimecmp = 0xFFFFFFFFFFFFFFFF }, // TODO: ideally, the clock should be external to the CPU
   };
@@ -201,22 +201,22 @@ const stdout = std.io.getStdOut().writer();
 pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) void {
   if (address > cpu.mem.len) {
     @breakpoint();
-    exception(@enumToInt(csr.MCauseExceptionCode.StoreAccessFault), cpu.pc, cpu);
+    exception(@intFromEnum(csr.MCauseExceptionCode.StoreAccessFault), cpu.pc, cpu);
   } else if (address >= 0x80000000) {
     switch (T) {
       u8 => cpu.mem[address] = value,
       u16 => {
-        cpu.mem[address] = @intCast(u8, value & 0x00FF);
-        cpu.mem[address + 1] = @intCast(u8, (value & 0xFF00) >> 8);
+        cpu.mem[address] = @as(u8, @intCast(value & 0x00FF));
+        cpu.mem[address + 1] = @as(u8, @intCast((value & 0xFF00) >> 8));
         // TODO: Faster but ugly?
         // var toto: *u16 = @ptrCast(*u16, @alignCast(2, &cpu.mem[address]));
         // toto.* = value;
       },
       u32 => {
-        cpu.mem[address] = @intCast(u8, value & 0x000000FF);
-        cpu.mem[address + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-        cpu.mem[address + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
-        cpu.mem[address + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+        cpu.mem[address] = @as(u8, @intCast(value & 0x000000FF));
+        cpu.mem[address + 1] = @as(u8, @intCast((value & 0x0000FF00) >> 8));
+        cpu.mem[address + 2] = @as(u8, @intCast((value & 0x00FF0000) >> 16));
+        cpu.mem[address + 3] = @as(u8, @intCast((value & 0xFF000000) >> 24));
         // TODO: Faster but ugly?
         // var toto: *u32 = @ptrCast(*u32, @alignCast(4, &cpu.mem[address]));
         // toto.* = value;
@@ -262,7 +262,7 @@ pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) v
 
 pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
   if (address > cpu.mem.len) {
-    exception(@enumToInt(csr.MCauseExceptionCode.LoadAccessFault), cpu.pc, cpu);
+    exception(@intFromEnum(csr.MCauseExceptionCode.LoadAccessFault), cpu.pc, cpu);
     // @breakpoint();
   } else if (address == 0) {
     std.os.exit(1);
@@ -287,8 +287,8 @@ pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
       // You can find more about these addresses in linux sources at driver/clocksource/timer-clint.c
       // The higher order bits could change after we query the lower order bits,
       // but the clint driver deals with this possibility.
-      0x1100BFF8 => return @intCast(T, cpu.clock.getTime() & 0x00000000FFFFFFFF),
-      0x1100BFFC => return @intCast(T, (cpu.clock.getTime() & 0xFFFFFFFF00000000) >> 32),
+      0x1100BFF8 => return @as(T, @intCast(cpu.clock.getTime() & 0x00000000FFFFFFFF)),
+      0x1100BFFC => return @as(T, @intCast((cpu.clock.getTime() & 0xFFFFFFFF00000000) >> 32)),
       else => {},
     }
   }
@@ -309,7 +309,7 @@ pub fn fetchJ(packets: u32) struct { rd: u5, imm: u32 } {
     (packets & 0b00000000000100000000000000000000) >> 9 |
     (packets & 0b00000000000011111111000000000000)
   ;
-  return .{ .rd = @intCast(u5, rd), .imm = imm };
+  return .{ .rd = @as(u5, @intCast(rd)), .imm = imm };
 }
 
 pub fn fetchR(packets: u32) struct { rd: u5, rs1: u5, rs2: u5, funct7: u7 } {
@@ -319,10 +319,10 @@ pub fn fetchR(packets: u32) struct { rd: u5, rs1: u5, rs2: u5, funct7: u7 } {
   const rs2 = (packets & 0x01F00000) >> 20;
   const funct7 = (packets & 0xFE000000) >> 25;
   return .{
-    .rd = @intCast(u5, rd),
-    .rs1 = @intCast(u5, rs1),
-    .rs2 = @intCast(u5, rs2),
-    .funct7 = @intCast(u7, funct7),
+    .rd = @as(u5, @intCast(rd)),
+    .rs1 = @as(u5, @intCast(rs1)),
+    .rs2 = @as(u5, @intCast(rs2)),
+    .funct7 = @as(u7, @intCast(funct7)),
   };
 }
 
@@ -331,7 +331,7 @@ pub fn fetchI(packets: u32) struct { rd: u5, rs1: u5, imm: u32 } {
   const rd = (packets & 0x00000F80) >> 7;
   const rs1 = (packets & 0x000F8000) >> 15;
   var imm = (packets & 0xFFF00000) >> 20;
-  return .{ .rd = @intCast(u5, rd), .rs1 = @intCast(u5, rs1), .imm = imm };
+  return .{ .rd = @as(u5, @intCast(rd)), .rs1 = @as(u5, @intCast(rs1)), .imm = imm };
 }
 
 pub fn fetchB(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
@@ -344,8 +344,8 @@ pub fn fetchB(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
     (packets & 0x00000080) << 4
   ;
   return .{
-    .rs1 = @intCast(u5, rs1),
-    .rs2 = @intCast(u5, rs2),
+    .rs1 = @as(u5, @intCast(rs1)),
+    .rs2 = @as(u5, @intCast(rs2)),
     .imm = imm,
   };
 }
@@ -358,8 +358,8 @@ pub fn fetchS(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
     (packets & 0xFE000000) >> 20
   ;
   return .{
-    .rs1 = @intCast(u5, rs1),
-    .rs2 = @intCast(u5, rs2),
+    .rs1 = @as(u5, @intCast(rs1)),
+    .rs2 = @as(u5, @intCast(rs2)),
     .imm = imm,
   };
 }
@@ -369,7 +369,7 @@ pub fn fetchU(packets: u32) struct { rd: u5, imm: u32 } {
   const rd = (packets & 0x00000F80) >> 7;
   const imm = (packets & 0xFFFFF000) >> 12;
   return .{
-    .rd = @intCast(u5, rd),
+    .rd = @as(u5, @intCast(rd)),
     .imm = imm,
   };
 }
@@ -498,7 +498,7 @@ fn blt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   std.log.debug("0x{x:0>8}: blt {s}(0x{x:0>8}), {s}(0x{x:0>8}), 0x{x:0>8} ({})", .{
     cpu.pc, register_names[params.rs1], cpu.rx[params.rs1], register_names[params.rs2], cpu.rx[params.rs2], params.imm, params.imm,
   });
-  if (@bitCast(i32, cpu.rx[params.rs1]) < @bitCast(i32, cpu.rx[params.rs2])) {
+  if (@as(i32, @bitCast(cpu.rx[params.rs1])) < @as(i32, @bitCast(cpu.rx[params.rs2]))) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
     const nextpc = cpu.pc +% offset;
     if (nextpc % @sizeOf(u32) == 0) {
@@ -517,7 +517,7 @@ fn bge(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   std.log.debug("0x{x:0>8}: bge {s}(0x{x:0>8}), {s}(0x{x:0>8}), 0x{x:0>8} ({})", .{
     cpu.pc, register_names[params.rs1], cpu.rx[params.rs1], register_names[params.rs2], cpu.rx[params.rs2], params.imm, params.imm,
   });
-  if (@bitCast(i32, cpu.rx[params.rs1]) >= @bitCast(i32, cpu.rx[params.rs2])) {
+  if (@as(i32, @bitCast(cpu.rx[params.rs1])) >= @as(i32, @bitCast(cpu.rx[params.rs2]))) {
     const offset = if (params.imm & 0x00001000 == 0) params.imm else (params.imm | 0xFFFFF000);
     const nextpc = cpu.pc +% offset;
     if (nextpc % @sizeOf(u32) == 0) {
@@ -666,7 +666,7 @@ fn sb(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   });
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
-  memwrite(u8, cpu, address, @intCast(u8, cpu.rx[params.rs2] & 0x000000FF));
+  memwrite(u8, cpu, address, @as(u8, @intCast(cpu.rx[params.rs2] & 0x000000FF)));
   cpu.pc += 4;
 }
 
@@ -679,7 +679,7 @@ fn sh(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!voi
   const offset = if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800);
   const address = cpu.rx[params.rs1] +% offset;
   const value = cpu.rx[params.rs2];
-  memwrite(u16, cpu, address, @intCast(u16, value & 0x0000FFFF));
+  memwrite(u16, cpu, address, @as(u16, @intCast(value & 0x0000FFFF)));
   cpu.pc += 4;
 }
 
@@ -703,8 +703,8 @@ fn slti(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
   std.log.debug("0x{x:0>8}: slti x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
-  const imm: i32 = @bitCast(i32, if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800));
-  cpu.rx[params.rd] = if (@bitCast(i32, cpu.rx[params.rs1]) < imm) 1 else 0;
+  const imm: i32 = @as(i32, @bitCast(if (params.imm & 0x00000800 == 0) params.imm else (params.imm | 0xFFFFF800)));
+  cpu.rx[params.rd] = if (@as(i32, @bitCast(cpu.rx[params.rs1])) < imm) 1 else 0;
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -764,7 +764,7 @@ fn slli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
     cpu.pc, register_names[params.rd], register_names[params.rs1],
     cpu.rx[params.rs1], params.imm,
   });
-  const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
+  const imm: u5 = @as(u5, @intCast(params.imm & 0x0000001F));
   cpu.rx[params.rd] = cpu.rx[params.rs1] << imm;
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -776,7 +776,7 @@ fn srli(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
   std.log.debug("0x{x:0>8}: srli x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
-  const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
+  const imm: u5 = @as(u5, @intCast(params.imm & 0x0000001F));
   cpu.rx[params.rd] = cpu.rx[params.rs1] >> imm;
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -788,9 +788,9 @@ fn srai(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
   std.log.debug("0x{x:0>8}: srai x{}, x{}(0x{x:0>8}), 0x{x:0>8}", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.imm,
   });
-  const imm: u5 = @intCast(u5, params.imm & 0x0000001F);
+  const imm: u5 = @as(u5, @intCast(params.imm & 0x0000001F));
   // Right shift will copy the original sign bit into the shift if the operand is signed.
-  cpu.rx[params.rd] = @bitCast(u32, @bitCast(i32, cpu.rx[params.rs1]) >> imm);
+  cpu.rx[params.rd] = @as(u32, @bitCast(@as(i32, @bitCast(cpu.rx[params.rs1])) >> imm));
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -825,7 +825,7 @@ fn sll(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
     cpu.pc, register_names[params.rd], register_names[params.rs1],
     cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
-  const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
+  const shift: u5 = @as(u5, @intCast(cpu.rx[params.rs2] & 0x0000001F));
   cpu.rx[params.rd] = cpu.rx[params.rs1] << shift;
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -837,7 +837,7 @@ fn slt(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   std.log.debug("0x{x:0>8}: slt x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
-  cpu.rx[params.rd] = if (@bitCast(i32, cpu.rx[params.rs1]) < @bitCast(i32, cpu.rx[params.rs2])) 1 else 0;
+  cpu.rx[params.rd] = if (@as(i32, @bitCast(cpu.rx[params.rs1])) < @as(i32, @bitCast(cpu.rx[params.rs2]))) 1 else 0;
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -870,7 +870,7 @@ fn srl(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   std.log.debug("0x{x:0>8}: srl x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
-  const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
+  const shift: u5 = @as(u5, @intCast(cpu.rx[params.rs2] & 0x0000001F));
   cpu.rx[params.rd] = cpu.rx[params.rs1] >> shift;
   cpu.rx[0] = 0;
   cpu.pc += 4;
@@ -882,8 +882,8 @@ fn sra(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!vo
   std.log.debug("0x{x:0>8}: sra x{}, x{}(0x{x:0>8}), x{}(0x{x:0>8})", .{
     cpu.pc, params.rd, params.rs1, cpu.rx[params.rs1], params.rs2, cpu.rx[params.rs2],
   });
-  const shift: u5 = @intCast(u5, cpu.rx[params.rs2] & 0x0000001F);
-  cpu.rx[params.rd] = @bitCast(u32, @bitCast(i32, cpu.rx[params.rs1]) >> shift);
+  const shift: u5 = @as(u5, @intCast(cpu.rx[params.rs2] & 0x0000001F));
+  cpu.rx[params.rd] = @as(u32, @bitCast(@as(i32, @bitCast(cpu.rx[params.rs1])) >> shift));
   cpu.rx[0] = 0;
   cpu.pc += 4;
 }
@@ -917,10 +917,10 @@ fn ecall(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   const params = fetchI(packets);
   if (params.imm == 1) { // EBREAK
     // @breakpoint();
-    exception(@enumToInt(csr.MCauseExceptionCode.Breakpoint), cpu.pc, cpu);
+    exception(@intFromEnum(csr.MCauseExceptionCode.Breakpoint), cpu.pc, cpu);
   } else { // ECALL
     std.log.debug("0x{x:0>8}: ecall", .{ cpu.pc });
-    exception(@enumToInt(csr.MCauseExceptionCode.MachineModeEnvCall), 0, cpu);
+    exception(@intFromEnum(csr.MCauseExceptionCode.MachineModeEnvCall), 0, cpu);
   }
 }
 
@@ -933,7 +933,7 @@ fn mret(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!v
   const mstatus = cpu.csr[csr.mstatus];
   // riscv-privileged-20211203.pdf Ch. 3.1.6 Machine Status Register (mstatus)
   // Set privilege mode to Machine Previous Privilege (MPP) mode as set in the mstatus register.
-  // cpu.priv_level = @intCast(u3, (mstatus & 0x00001800) >> 11);
+  // cpu.priv_level = @as(u3, @intCast((mstatus & 0x00001800)) >> 11);
   cpu.priv_level = 0x3; // Force Machine mode which is the only mode implemented right now.
   // Set Machine Interrupt Enabled to Machine Previous Interrupt Enabled.
   // cpu.csr[csr.mstatus] |= (mstatus & 0x00000080) >> 4;
@@ -963,7 +963,7 @@ fn csrrs(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   // setting a CSR can raise an exception so the pc register must point correctly
   // before setting the CSR.
   cpu.pc += 4;
-  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+  if (csr.csrRegistry[params.imm].flags & @intFromEnum(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) | initial_value);
   }
 }
@@ -982,7 +982,7 @@ fn csrrc(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   cpu.rx[params.rd] = cpu.csr[params.imm];
   cpu.rx[0] = 0;
   cpu.pc += 4;
-  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+  if (csr.csrRegistry[params.imm].flags & @intFromEnum(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) & (~initial_value));
   }
 }
@@ -1001,7 +1001,7 @@ fn csrrw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError!
   cpu.rx[params.rd] = cpu.csr[params.imm];
   cpu.rx[0] = 0;
   cpu.pc += 4;
-  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+  if (csr.csrRegistry[params.imm].flags & @intFromEnum(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, initial_value);
   }
 }
@@ -1020,7 +1020,7 @@ fn csrrwi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   cpu.rx[params.rd] = csr.csrRegistry[params.imm].get(cpu.*);
   cpu.rx[0] = 0;
   cpu.pc += 4;
-  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+  if (csr.csrRegistry[params.imm].flags & @intFromEnum(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, initial_value);
   }
 }
@@ -1039,7 +1039,7 @@ fn csrrsi(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   cpu.rx[params.rd] = cpu.csr[params.imm];
   cpu.rx[0] = 0;
   cpu.pc += 4;
-  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+  if (csr.csrRegistry[params.imm].flags & @intFromEnum(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) | initial_value);
   }
 }
@@ -1058,7 +1058,7 @@ fn csrrci(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscError
   cpu.rx[params.rd] = cpu.csr[params.imm];
   cpu.rx[0] = 0;
   cpu.pc += 4;
-  if (csr.csrRegistry[params.imm].flags & @enumToInt(csr.Flags.WRITE) != 0) {
+  if (csr.csrRegistry[params.imm].flags & @intFromEnum(csr.Flags.WRITE) != 0) {
     csr.csrRegistry[params.imm].set(cpu, csr.csrRegistry[params.imm].get(cpu.*) & (~initial_value));
   }
 }
@@ -1070,7 +1070,7 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
     // https://github.com/ziglang/zig/blob/6b3f59c3a735ddbda3b3a62a0dfb5d55fa045f57/lib/std/comptime_string_map.zig
     pub fn decode(opcode: u8, funct3: u8, funct7: u8) GetInstruction!Instruction {
       const precomputed = comptime blk: {
-        @setEvalBranchQuota(2000);
+        @setEvalBranchQuota(10000);
         var sorted_opcodes = instruction_set[0..].*;
         const asc = (struct {
           fn asc(context: void, a: Instruction, b: Instruction) bool {
@@ -1083,7 +1083,7 @@ pub fn makeDecoder(comptime instruction_set: []const Instruction) fn(opcode: u8,
             return a.opcode > b.opcode or (a.opcode == b.opcode and (afunct3 == bfunct3 and afunct7 > bfunct7) or afunct3 > bfunct3);
           }
         }).asc;
-        std.mem.sort(Instruction, &sorted_opcodes, {}, asc);
+        std.mem.sortUnstable(Instruction, &sorted_opcodes, {}, asc);
         break :blk .{
           .max_opcode = sorted_opcodes[0].opcode,
           .min_opcode = sorted_opcodes[sorted_opcodes.len - 1].opcode,
@@ -1125,9 +1125,9 @@ const decode = makeDecoder(
 const Code = struct { opcode: u8, funct3: u8, funct7: u8 };
 
 pub inline fn fetch(packet: u32) Code {
-  const opcode: u8 = @intCast(u8, 0x7F & packet);
-  const funct3: u8 = @intCast(u8, (0x7000 & packet) >> 12);
-  const funct7: u8 = @intCast(u8, (0xFE000000 & packet) >> 25);
+  const opcode: u8 = @as(u8, @intCast(0x7F & packet));
+  const funct3: u8 = @as(u8, @intCast((0x7000 & packet) >> 12));
+  const funct7: u8 = @as(u8, @intCast((0xFE000000 & packet) >> 25));
 
   return .{
     .opcode = opcode,
@@ -1147,18 +1147,18 @@ pub const ErrCode = union(enum) {
 pub fn checkForInterrupt(cpu: *RiscVCPU(u32)) void {
   const mip = csr.csrRegistry[csr.mip].get(cpu.*);
   if (mip != 0) { // is an interrupt is pending?
-    if (cpu.priv_level == @enumToInt(csr.PrivilegeMode.MACHINE) and // If in Machine mode
+    if (cpu.priv_level == @intFromEnum(csr.PrivilegeMode.MACHINE) and // If in Machine mode
       (csr.csrRegistry[csr.mstatus].get(cpu.*) & csr.MstatusBits.MIE) != 0) { // and interrupts are enabled
       // Fetch the pending interrupt
       const mie = csr.csrRegistry[csr.mie].get(cpu.*);
       // Priority order: MEI, MSI, MTI, SEI, SSI, STI according to riscv-privileged-20211203.pdf Ch. 3.1.9
       if ((mip & mie & (1 << 11)) != 0) { // External (hardware) interrupt
         // 0x80000000 mark the exception as being an interruption.
-        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineExternalInterrupt) | 0x80000000, 0, cpu);
+        interrupt(@intFromEnum(csr.MCauseInterruptCode.MachineExternalInterrupt) | 0x80000000, 0, cpu);
       } else if ((mip & mie & (1 <<  3)) != 0) { // Software interrupt
-        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineSoftwareInterrupt) | 0x80000000, 0, cpu);
+        interrupt(@intFromEnum(csr.MCauseInterruptCode.MachineSoftwareInterrupt) | 0x80000000, 0, cpu);
       } else if ((mip & mie & (1 <<  7)) != 0) { // Timer interrupt
-        interrupt(@enumToInt(csr.MCauseInterruptCode.MachineTimerInterrupt) | 0x80000000, 0, cpu);
+        interrupt(@intFromEnum(csr.MCauseInterruptCode.MachineTimerInterrupt) | 0x80000000, 0, cpu);
       }
       // const SSIP = mip &  1;
       // const STIP = (mip &  5) and (mie &  5);
@@ -1180,7 +1180,7 @@ fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
   // according to riscv-privileged-20211203.pdf Ch. 3.1.16, mtval contains information on error 0 otherwise.
   cpu.csr[csr.mtval] = mtval;
   // update mstatus with current mode (also riscv-privileged-20211203.pdf Ch. 3.1.6.1 Privileged and Global Interrupt-enable Stack in mstatus)
-  cpu.csr[csr.mstatus] = cpu.csr[csr.mstatus] | (@intCast(u32, cpu.priv_level) << 11);
+  cpu.csr[csr.mstatus] = cpu.csr[csr.mstatus] | (@as(u32, @intCast(cpu.priv_level)) << 11);
   // Set Machine Previous Interrupt Enabled to Machine Interrupt Enabled
   cpu.csr[csr.mstatus] |= (cpu.csr[csr.mstatus] & 0x00000008) << 4;
   // update mstatus to disable interrupt
@@ -1198,12 +1198,12 @@ fn illegalInstruction(packets: u32, cpu: *RiscVCPU(u32)) void {
       packets, cpu.pc, code.opcode, code.funct3, code.funct7,
     });
   }
-  exception(@enumToInt(csr.MCauseExceptionCode.IllegalInstruction), packets, cpu);
+  exception(@intFromEnum(csr.MCauseExceptionCode.IllegalInstruction), packets, cpu);
 }
 
 pub fn instructionAddressMisaligned(badaddress: u32, cpu: *RiscVCPU(u32)) void {
   std.log.debug("Instruction address misaligned @ 0x{x:0>8}", .{ cpu.pc });
-  exception(@enumToInt(csr.MCauseExceptionCode.InstructionAddressMisaligned), badaddress, cpu);
+  exception(@intFromEnum(csr.MCauseExceptionCode.InstructionAddressMisaligned), badaddress, cpu);
 }
 
 fn incrementCycle(cpu: *RiscVCPU(u32)) void {
@@ -1303,7 +1303,7 @@ pub fn main() !u8 {
   };
   defer allocator.free(cpu.raw_mem);
   // TODO: TMP For compat with mini-rv32ima project
-  std.mem.set(u8, cpu.raw_mem, 0);
+  @memset(cpu.raw_mem, 0);
 
   // Load the executable (or kernel)
   const executable = loadfile(options.exec_filename) catch |err| {
@@ -1325,15 +1325,15 @@ pub fn main() !u8 {
       return 1;
     };
     // Expand memory to make room for the DTB.
-    options.mem_size = options.mem_size + @intCast(u32, dtb.len);
+    options.mem_size = options.mem_size + @as(u32, @intCast(dtb.len));
     allocator.free(cpu.raw_mem);
     cpu.raw_mem = try allocator.alloc(u8, options.mem_size);
     cpu.mem = (cpu.raw_mem.ptr - options.page_offset)[0..options.page_offset + options.mem_size];
     // TODO: TMP For compat with mini-rv32ima project
-    std.mem.set(u8, cpu.raw_mem, 0);
+    @memset(cpu.raw_mem, 0);
     // Load the DTB at the end of the memory to ensure that the kernel never
     // write to the it (basically making it readonly).
-    dtb_addr = @intCast(u32, cpu.mem.len - dtb.len);
+    dtb_addr = @as(u32, @intCast(cpu.mem.len - dtb.len));
     std.mem.copy(u8, cpu.mem[dtb_addr..], dtb);
     std.os.munmap(dtb);
     // According to https://www.sifive.com/blog/all-aboard-part-6-booting-a-risc-v-linux-kernel

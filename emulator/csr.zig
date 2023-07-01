@@ -18,14 +18,14 @@ pub const Flags = enum(u7) {
 
 pub const ModeMask = 0x03;
 
-const URW = @enumToInt(PrivilegeMode.USER)        | @enumToInt(Flags.READ) | @enumToInt(Flags.WRITE);
-const URO = @enumToInt(PrivilegeMode.USER)        | @enumToInt(Flags.READ)                          ;
-const SRW = @enumToInt(PrivilegeMode.SUPERVISOR)  | @enumToInt(Flags.READ) | @enumToInt(Flags.WRITE);
-const HRW = @enumToInt(PrivilegeMode.HYPERVISOR)  | @enumToInt(Flags.READ) | @enumToInt(Flags.WRITE);
-const HRO = @enumToInt(PrivilegeMode.HYPERVISOR)  | @enumToInt(Flags.READ)                          ;
-const MRW = @enumToInt(PrivilegeMode.MACHINE)     | @enumToInt(Flags.READ) | @enumToInt(Flags.WRITE);
-const MRO = @enumToInt(PrivilegeMode.MACHINE)     | @enumToInt(Flags.READ)                          ;
-const DRW = @enumToInt(Flags.DEBUG)               | @enumToInt(Flags.READ) | @enumToInt(Flags.WRITE);
+const URW = @intFromEnum(PrivilegeMode.USER)        | @intFromEnum(Flags.READ) | @intFromEnum(Flags.WRITE);
+const URO = @intFromEnum(PrivilegeMode.USER)        | @intFromEnum(Flags.READ)                          ;
+const SRW = @intFromEnum(PrivilegeMode.SUPERVISOR)  | @intFromEnum(Flags.READ) | @intFromEnum(Flags.WRITE);
+const HRW = @intFromEnum(PrivilegeMode.HYPERVISOR)  | @intFromEnum(Flags.READ) | @intFromEnum(Flags.WRITE);
+const HRO = @intFromEnum(PrivilegeMode.HYPERVISOR)  | @intFromEnum(Flags.READ)                          ;
+const MRW = @intFromEnum(PrivilegeMode.MACHINE)     | @intFromEnum(Flags.READ) | @intFromEnum(Flags.WRITE);
+const MRO = @intFromEnum(PrivilegeMode.MACHINE)     | @intFromEnum(Flags.READ)                          ;
+const DRW = @intFromEnum(Flags.DEBUG)               | @intFromEnum(Flags.READ) | @intFromEnum(Flags.WRITE);
 
 pub const CSR = struct {
   const Self = @This();

@@ -141,9 +141,9 @@ fn amoaddw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
     cpu.rx[params.rd] = memread(u32, cpu, address);
-    const signed_rd = @bitCast(i32, cpu.rx[params.rd]);
-    const signed_rs2 = @bitCast(i32, cpu.rx[params.rs2]);
-    memwrite(u32, cpu, address, @bitCast(u32, signed_rd +% signed_rs2));
+    const signed_rd = @as(i32, @bitCast(cpu.rx[params.rd]));
+    const signed_rs2 = @as(i32, @bitCast(cpu.rx[params.rs2]));
+    memwrite(u32, cpu, address, @as(u32, @bitCast(signed_rd +% signed_rs2)));
     cpu.rx[0] = 0;
     cpu.pc += 4;
   } else {
@@ -218,10 +218,10 @@ fn amominw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
     cpu.rx[params.rd] = memread(u32, cpu, address);
-    const result = @bitCast(u32, std.math.min(
-      @bitCast(i32, cpu.rx[params.rd]),
-      @bitCast(i32, cpu.rx[params.rs2])
-    ));
+    const result = @as(u32, @bitCast(@min(
+      @as(i32, @bitCast(cpu.rx[params.rd])),
+      @as(i32, @bitCast(cpu.rx[params.rs2]))
+    )));
     memwrite(u32, cpu, address, result);
     cpu.rx[0] = 0;
     cpu.pc += 4;
@@ -240,10 +240,10 @@ fn amomaxw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErro
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
     cpu.rx[params.rd] = memread(u32, cpu, address);
-    const result = @bitCast(u32, std.math.max(
-      @bitCast(i32, cpu.rx[params.rd]),
-      @bitCast(i32, cpu.rx[params.rs2])
-    ));
+    const result = @as(u32, @bitCast(@max(
+      @as(i32, @bitCast(cpu.rx[params.rd])),
+      @as(i32, @bitCast(cpu.rx[params.rs2]))
+    )));
     memwrite(u32, cpu, address, result);
     cpu.rx[0] = 0;
     cpu.pc += 4;
@@ -262,7 +262,7 @@ fn amominuw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErr
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
     cpu.rx[params.rd] = memread(u32, cpu, address);
-    const result = std.math.min(cpu.rx[params.rd], cpu.rx[params.rs2]);
+    const result = @min(cpu.rx[params.rd], cpu.rx[params.rs2]);
     memwrite(u32, cpu, address, result);
     cpu.rx[0] = 0;
     cpu.pc += 4;
@@ -281,7 +281,7 @@ fn amomaxuw(instruction: Instruction, cpu: *RiscVCPU(u32), packets: u32) RiscErr
   const address = cpu.rx[params.rs1];
   if (address % @sizeOf(u32) == 0) {
     cpu.rx[params.rd] = memread(u32, cpu, address);
-    const result = std.math.max(cpu.rx[params.rd], cpu.rx[params.rs2]);
+    const result = @max(cpu.rx[params.rd], cpu.rx[params.rs2]);
     memwrite(u32, cpu, address, result);
     cpu.rx[0] = 0;
     cpu.pc += 4;

@@ -120,7 +120,7 @@ fn load_fixture(allocator: std.mem.Allocator, filename: []const u8)
   };
 
   return .{
-    .parsed_data = parsed_data,
+    .parsed_data = parsed_data.value, // leaks but we don't care
     .skip_list = skip_list,
   };
 }
@@ -153,7 +153,6 @@ pub fn main() !u8 {
     // Open the file
     // const test_filename = "tests/toto.json";
     const fixture = try load_fixture(allocator, fixture_file);
-    defer std.json.parseFree([]TestCase, allocator, fixture.parsed_data);
 
     // Go through the test cases
     mainloop: for (fixture.parsed_data, 0..) |testCase, i| {
@@ -175,12 +174,12 @@ pub fn main() !u8 {
               println(" skipped (64 bits)", .{});
               continue :mainloop;
             }
-            const value = @intCast(u32, 0x00000000FFFFFFFF & parsed);
+            const value = @as(u32, @intCast(0x00000000FFFFFFFF & parsed));
             const register = initial.index.?;
             cpu.rx[register] = value;
           },
           .pc_value => {
-            cpu.pc = @intCast(u32, try std.fmt.parseInt(u64, initial.value, 0));
+            cpu.pc = @as(u32, @intCast(try std.fmt.parseInt(u64, initial.value, 0)));
           },
           .memory_value => {
             switch (initial.size.?) {
@@ -189,15 +188,15 @@ pub fn main() !u8 {
               },
               2 => {
                 const value = try std.fmt.parseInt(u16, initial.value, 0);
-                cpu.mem[initial.address.?] = @intCast(u8, value & 0x00FF);
-                cpu.mem[initial.address.? + 1] = @intCast(u8, (value & 0xFF00) >> 8);
+                cpu.mem[initial.address.?] = @as(u8, @intCast(value & 0x00FF));
+                cpu.mem[initial.address.? + 1] = @as(u8, @intCast((value & 0xFF00) >> 8));
               },
               4 => {
                 const value = try std.fmt.parseInt(u32, initial.value, 0);
-                cpu.mem[initial.address.?] = @intCast(u8, value & 0x000000FF);
-                cpu.mem[initial.address.? + 1] = @intCast(u8, (value & 0x0000FF00) >> 8);
-                cpu.mem[initial.address.? + 2] = @intCast(u8, (value & 0x00FF0000) >> 16);
-                cpu.mem[initial.address.? + 3] = @intCast(u8, (value & 0xFF000000) >> 24);
+                cpu.mem[initial.address.?] = @as(u8, @intCast(value & 0x000000FF));
+                cpu.mem[initial.address.? + 1] = @as(u8, @intCast((value & 0x0000FF00) >> 8));
+                cpu.mem[initial.address.? + 2] = @as(u8, @intCast((value & 0x00FF0000) >> 16));
+                cpu.mem[initial.address.? + 3] = @as(u8, @intCast((value & 0xFF000000) >> 24));
               },
               else => unreachable,
             }
@@ -215,9 +214,9 @@ pub fn main() !u8 {
           .csr_value => unreachable,
           .freg_value => unreachable,
           .xreg_value => {
-            const value = @intCast(u32, 0x00000000FFFFFFFF & try std.fmt.parseInt(u64, assert.value, 0));
+            const value = @as(u32, @intCast(0x00000000FFFFFFFF & try std.fmt.parseInt(u64, assert.value, 0)));
             const register = assert.index.?;
-            try assertEqual(cpu.rx[register], @intCast(u32, value),
+            try assertEqual(cpu.rx[register], @as(u32, @intCast(value)),
               try std.fmt.allocPrint(allocator, "xreg {} does not have the correct value", .{ register }));
           },
           .pc_value => {

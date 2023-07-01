@@ -6,20 +6,20 @@ pub const Clock = struct {
   mtimecmp: u64,
 
   pub inline fn getTime(_: Self) u64 {
-    return @intCast(u64, std.time.microTimestamp());
+    return @as(u64, @intCast(std.time.microTimestamp()));
   }
 
   pub inline fn getMTimeCmp(self: Self) u64 {
-    return @intCast(u64, self.mtimecmp);
+    return @as(u64, @intCast(self.mtimecmp));
   }
 
   pub inline fn setMTimeCmpH(self: *Self, value: u32) void {
     self.mtimecmp = (self.mtimecmp & 0x00000000FFFFFFFF)
-      | (@intCast(u64, value) << 32);
+      | (@as(u64, @intCast(value)) << 32);
   }
 
   pub inline fn setMTimeCmpL(self: *Self, value: u32) void {
-    self.mtimecmp = (self.mtimecmp & 0xFFFFFFFF00000000) | @intCast(u64, value);
+    self.mtimecmp = (self.mtimecmp & 0xFFFFFFFF00000000) | @as(u64, @intCast(value));
   }
 };
 
