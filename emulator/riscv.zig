@@ -330,7 +330,7 @@ pub fn fetchI(packets: u32) struct { rd: u5, rs1: u5, imm: u32 } {
   // 0biiiiiiii iiii1111 1fffrrrr rooooooo
   const rd = (packets & 0x00000F80) >> 7;
   const rs1 = (packets & 0x000F8000) >> 15;
-  var imm = (packets & 0xFFF00000) >> 20;
+  const imm = (packets & 0xFFF00000) >> 20;
   return .{ .rd = @as(u5, @intCast(rd)), .rs1 = @as(u5, @intCast(rs1)), .imm = imm };
 }
 
@@ -338,7 +338,7 @@ pub fn fetchB(packets: u32) struct { rs1: u5, rs2: u5, imm: u32 } {
   // 0biiiiiii2 22221111 1fffiiii iooooooo
   const rs1 = (packets & 0x000F8000) >> 15;
   const rs2 = (packets & 0x01F00000) >> 20;
-  var imm = (packets & 0x80000000) >> 19 |
+  const imm = (packets & 0x80000000) >> 19 |
     (packets & 0x7E000000) >> 20 |
     (packets & 0x00000F00) >> 7  |
     (packets & 0x00000080) << 4
@@ -1228,7 +1228,7 @@ pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
     // set the MTIP (Machine Timer Interrupt Pending) flag, which will trigger the interrupt.
     csr.csrRegistry[csr.mip].set(cpu, csr.csrRegistry[csr.mip].get(cpu.*) | (1 <<  7));
   }
-  var packets: u32 = memread(u32, cpu, cpu.pc);
+  const packets: u32 = memread(u32, cpu, cpu.pc);
   const code = fetch(packets);
   const inst = decode(code.opcode, code.funct3, code.funct7) catch |err| {
     _ = switch (err) {
@@ -1291,7 +1291,7 @@ pub fn main() !u8 {
   var options = try get_options(args);
 
   // Create the CPU.
-  var mem = try allocator.alloc(u8, options.mem_size); // might change if a DTB is loaded.
+  const mem = try allocator.alloc(u8, options.mem_size); // might change if a DTB is loaded.
   var cpu: RiscVCPU(u32) = .{
     .pc = options.page_offset,
     .rx = [_]u32{ 0 } ** 32,
@@ -1334,7 +1334,7 @@ pub fn main() !u8 {
     // Load the DTB at the end of the memory to ensure that the kernel never
     // write to the it (basically making it readonly).
     dtb_addr = @as(u32, @intCast(cpu.mem.len - dtb.len));
-    std.mem.copy(u8, cpu.mem[dtb_addr..], dtb);
+    @memcpy(cpu.mem[dtb_addr..], dtb);
     std.os.munmap(dtb);
     // According to https://www.sifive.com/blog/all-aboard-part-6-booting-a-risc-v-linux-kernel
     // linux expects the core id in a0 and the address to the DTB in a1.
@@ -1343,7 +1343,7 @@ pub fn main() !u8 {
     cpu.rx[11] = dtb_addr; // a1
   }
   // Load the executable at the memory start
-  std.mem.copy(u8, cpu.raw_mem, executable);
+  @memcpy(cpu.raw_mem, executable);
   std.os.munmap(executable);
 
   // Start the emulation.
