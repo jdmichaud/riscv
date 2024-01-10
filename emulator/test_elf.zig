@@ -75,7 +75,7 @@ pub fn main() !void {
   defer std.process.argsFree(allocator, args);
 
   const offset = 0x80000000;
-  var mem = try allocator.alloc(u8, 1024 * 1024 * 64); // 4K addressable memory
+  const mem = try allocator.alloc(u8, 1024 * 1024 * 64); // 4K addressable memory
 
   var fails: u16 = 0;
   var passes: u16 = 0;

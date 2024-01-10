@@ -57,7 +57,7 @@ fn unzip(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
   defer gzip_stream.deinit();
 
   // Read and decompress the whole file
-  var buf = try gzip_stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+  const buf = try gzip_stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
   return buf;
 }
 
@@ -70,7 +70,7 @@ fn load_fixture(allocator: std.mem.Allocator, filename: []const u8)
   !struct { parsed_data: []TestCase, skip_list: std.AutoHashMap(usize, bool) } {
   println("inflating {s}.json.gz...", .{ filename });
   // Load test cases
-  var jsonfilename = try std.fmt.allocPrint(allocator, "{s}{s}", .{ filename, ".json.gz"});
+  const jsonfilename = try std.fmt.allocPrint(allocator, "{s}{s}", .{ filename, ".json.gz"});
   var file = try std.fs.cwd().openFile(jsonfilename, .{});
   defer file.close();
   // Map it in memory
@@ -85,7 +85,7 @@ fn load_fixture(allocator: std.mem.Allocator, filename: []const u8)
   );
   defer std.os.munmap(buffer);
   // Unzip it
-  var content = try unzip(allocator, buffer);
+  const content = try unzip(allocator, buffer);
   defer allocator.free(content);
   // var content = buffer;
   // Parse it
@@ -96,7 +96,7 @@ fn load_fixture(allocator: std.mem.Allocator, filename: []const u8)
   var skip_list = std.AutoHashMap(usize, bool).init(allocator);
   // Load skip
   _ = blk: {
-    var skip_filename = try std.fmt.allocPrint(allocator, "{s}{s}", .{ filename, ".skip"});
+    const skip_filename = try std.fmt.allocPrint(allocator, "{s}{s}", .{ filename, ".skip"});
     println("loading {s}...", .{ skip_filename });
     var skipfile = std.fs.cwd().openFile(skip_filename, .{}) catch { break :blk; };
     defer skipfile.close();
@@ -133,7 +133,7 @@ pub fn main() !u8 {
   defer std.process.argsFree(allocator, args);
 
   // Create a CPU
-  var mem = try allocator.alloc(u8, std.math.pow(u64, 2, 32)); // 4G addressable memory
+  const mem = try allocator.alloc(u8, std.math.pow(u64, 2, 32)); // 4G addressable memory
   var cpu: riscv.RiscVCPU(u32) = .{
     // Memory as allocated
     .raw_mem = mem,

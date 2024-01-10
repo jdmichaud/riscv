@@ -1343,7 +1343,8 @@ pub fn main() !u8 {
     cpu.rx[11] = dtb_addr; // a1
   }
   // Load the executable at the memory start
-  @memcpy(cpu.raw_mem, executable);
+  println("cpu.raw_mem {} executable {}", .{ cpu.raw_mem.len, executable.len });
+  std.mem.copyForwards(u8, cpu.raw_mem, executable);
   std.os.munmap(executable);
 
   // Start the emulation.
