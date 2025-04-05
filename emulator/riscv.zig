@@ -1194,7 +1194,7 @@ fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
 fn illegalInstruction(packets: u32, cpu: *RiscVCPU(u32)) void {
   if (std_options.log_level == .debug) {
     const code = fetch(packets);
-    std.log.debug("Illegal instruction 0x{x:0>8} @ 0x{x:0>8} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
+    println("Illegal instruction 0x{x:0>8} @ 0x{x:0>8} (opcode: 0b{b} funct3: 0b{b} funct7: 0b{b})", .{
       packets, cpu.pc, code.opcode, code.funct3, code.funct7,
     });
   }
@@ -1202,7 +1202,7 @@ fn illegalInstruction(packets: u32, cpu: *RiscVCPU(u32)) void {
 }
 
 pub fn instructionAddressMisaligned(badaddress: u32, cpu: *RiscVCPU(u32)) void {
-  std.log.debug("Instruction address misaligned @ 0x{x:0>8}", .{ cpu.pc });
+  println("Instruction address misaligned @ 0x{x:0>8}", .{ cpu.pc });
   exception(@intFromEnum(csr.MCauseExceptionCode.InstructionAddressMisaligned), badaddress, cpu);
 }
 
@@ -1343,7 +1343,7 @@ pub fn main() !u8 {
     cpu.rx[11] = dtb_addr; // a1
   }
   // Load the executable at the memory start
-  println("cpu.raw_mem {} executable {}", .{ cpu.raw_mem.len, executable.len });
+  println("cpu.raw_mem 0x{x:0>8} executable 0x{x:0>8}", .{ cpu.raw_mem.len, executable.len });
   std.mem.copyForwards(u8, cpu.raw_mem, executable);
   std.posix.munmap(executable);
 
