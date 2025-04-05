@@ -265,7 +265,7 @@ pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
     exception(@intFromEnum(csr.MCauseExceptionCode.LoadAccessFault), cpu.pc, cpu);
     // @breakpoint();
   } else if (address == 0) {
-    std.os.exit(1);
+    std.posix.exit(1);
   } else if (address >= 0x80000000) {
     const value = switch (T) {
       u8 => cpu.mem[address],
@@ -1258,27 +1258,27 @@ pub fn cycle(cpu: *RiscVCPU(u32)) !?ErrCode {
   return null;
 }
 
-fn loadfile(filename: []const u8) ![]align(std.mem.page_size) u8 {
+fn loadfile(filename: []const u8) ![]const align(std.heap.page_size_min) u8 {
   var file = try std.fs.cwd().openFile(filename, .{});
   defer file.close();
 
   const file_size = try file.getEndPos();
-  const buffer = try std.os.mmap(
+  const buffer = try std.posix.mmap(
     null,
     file_size,
-    std.os.PROT.READ,
-    std.os.MAP.SHARED,
+    std.posix.PROT.READ,
+    .{ .TYPE = .SHARED },
     file.handle,
     0,
   );
-  errdefer std.os.munmap(buffer);
+  errdefer std.posix.munmap(buffer);
 
   return buffer;
 }
 
-pub const std_options = struct {
-  // pub const log_level = .debug;
-  pub const log_level = .info;
+pub const std_options = std.Options{
+  .log_level = .debug,
+  // .log_level = .info,
 };
 
 pub fn main() !u8 {
@@ -1335,7 +1335,7 @@ pub fn main() !u8 {
     // write to the it (basically making it readonly).
     dtb_addr = @as(u32, @intCast(cpu.mem.len - dtb.len));
     @memcpy(cpu.mem[dtb_addr..], dtb);
-    std.os.munmap(dtb);
+    std.posix.munmap(dtb);
     // According to https://www.sifive.com/blog/all-aboard-part-6-booting-a-risc-v-linux-kernel
     // linux expects the core id in a0 and the address to the DTB in a1.
     cpu.rx[10] = 0; // a0
@@ -1345,7 +1345,7 @@ pub fn main() !u8 {
   // Load the executable at the memory start
   println("cpu.raw_mem {} executable {}", .{ cpu.raw_mem.len, executable.len });
   std.mem.copyForwards(u8, cpu.raw_mem, executable);
-  std.os.munmap(executable);
+  std.posix.munmap(executable);
 
   // Start the emulation.
   while (true) {
