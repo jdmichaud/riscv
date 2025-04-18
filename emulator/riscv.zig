@@ -1326,6 +1326,7 @@ pub fn main() !u8 {
       };
       return 1;
     };
+    defer std.posix.munmap(dtb);
     // Expand memory to make room for the DTB.
     options.mem_size = options.mem_size + @as(u32, @intCast(dtb.len));
     allocator.free(cpu.raw_mem);
@@ -1337,7 +1338,6 @@ pub fn main() !u8 {
     // write to the it (basically making it readonly).
     dtb_addr = @as(u32, @intCast(cpu.mem.len - dtb.len));
     @memcpy(cpu.mem[dtb_addr..], dtb);
-    std.posix.munmap(dtb);
     // According to https://www.sifive.com/blog/all-aboard-part-6-booting-a-risc-v-linux-kernel
     // linux expects the core id in a0 and the address to the DTB in a1.
     cpu.rx[10] = 0; // a0
