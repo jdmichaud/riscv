@@ -261,10 +261,12 @@ pub fn memwrite(comptime T: type, cpu: *RiscVCPU(u32), address: u32, value: T) v
 }
 
 pub fn memread(comptime T: type, cpu: *RiscVCPU(u32), address: u32) T {
+  std.log.debug("memread {} @0x{x:0>8}", .{ T, address });
   if (address > cpu.mem.len) {
     exception(@intFromEnum(csr.MCauseExceptionCode.LoadAccessFault), cpu.pc, cpu);
     // @breakpoint();
   } else if (address == 0) {
+    println("Trying to read 0x00000000, stop.", .{});
     std.posix.exit(1);
   } else if (address >= 0x80000000) {
     const value = switch (T) {
