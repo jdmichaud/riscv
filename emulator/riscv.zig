@@ -1189,7 +1189,7 @@ fn exception(cause: u32, mtval: u32, cpu: *RiscVCPU(u32)) void {
   cpu.csr[csr.mstatus] = cpu.csr[csr.mstatus] & 0xFFFFFFF7;
   // update mepc with current instruction address (also riscv-privileged-20211203.pdf Ch. 3.3.1 Environment Call and Breakpoint)
   cpu.csr[csr.mepc] = cpu.pc;
-  // Guessed from https://jborza.com/emulation/2021/04/22/ecalls-and-syscalls.html. Where is this documented?
+  // Guessed from https://jborza.com/post/2021-04-21-ecalls-and-syscalls/. Where is this documented?
   cpu.pc = csr.csrRegistry[csr.mtvec].get(cpu.*);
 }
 
